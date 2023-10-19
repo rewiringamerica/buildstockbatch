@@ -66,7 +66,8 @@ setuptools.setup(
         'console_scripts': [
             'buildstock_local=buildstockbatch.local:main',
             'buildstock_eagle=buildstockbatch.eagle:user_cli',
-            'buildstock_aws=buildstockbatch.aws.aws:main'
+            'buildstock_aws=buildstockbatch.aws.aws:main',
+            'buildstock_gcp=buildstockbatch.gcp.gcp:main'
         ]
     },
     license='BSD-3',
