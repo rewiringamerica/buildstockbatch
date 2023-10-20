@@ -263,11 +263,9 @@ class GcpBatch(DockerBatchBase):
         for job in response.jobs:
             logger.debug(job)
 
-            s = ['']
-            s.append(f'Name: {job.name}')
-            s.append(f'UID: {job.uid}')
-            s.append(f'Status: {str(job.status.state)}')
-            logger.info('\n '.join(s))
+            logger.info(f'Name: {job.name}')
+            logger.info(f'UID: {job.uid}')
+            logger.info(f'Status: {str(job.status.state)}')
 
     def run_batch(self):
         """
@@ -303,10 +301,10 @@ class GcpBatch(DockerBatchBase):
 
         # TODO: Update to run batches of openstudio with something like "python3 -m buildstockbatch.gcp.gcp"
         runnable.container.commands = [
-        "-c",
+            "-c",
             # Test script that checks whether openstudio is installed and writes to a file in GCS.
             "mkdir /mnt/disks/share/${JOB_ID}; openstudio --help > /mnt/disks/share/${JOB_ID}/output_${BATCH_TASK_INDEX}.txt"
-    ]
+        ]
 
         # Mount GCS Bucket, so we can use it like a normal directory.
         gcs_bucket = batch_v1.GCS(remote_path=self.bucket)
@@ -356,8 +354,8 @@ class GcpBatch(DockerBatchBase):
         job = batch_v1.Job()
         job.task_groups = [group]
         job.allocation_policy = allocation_policy
-        # TODO: What labels are useful to include here? (These are from sample code)
-        job.labels = {'env': 'testing', 'type': 'script'}
+        # TODO: What (if any) labels are useful to include here? (These are from sample code)
+        job.labels = {'env': 'testing'}
         job.logs_policy = batch_v1.LogsPolicy()
         job.logs_policy.destination = batch_v1.LogsPolicy.Destination.CLOUD_LOGGING
 
@@ -434,13 +432,12 @@ def main():
         # If this var exists, we're inside a single batch task.
         # TODO: Would it be cleaner to move this to a main() in another file?
         job_id = int(os.environ['BATCH_TASK_INDEX'])
-        # TODO: pass in these env vars to tasks
-        # TODO: shouldn't need bucket, if we mount the directory - just read like a normal file
-        bucket = os.environ['GCS_BUCKET']
-        prefix = os.environ['GCS_PREFIX']
+        # TODO: pass in these env vars to tasks as needed. (Do we really need bucket here?)
+        gcs_bucket = os.environ['GCS_BUCKET']
+        gcs_prefix = os.environ['GCS_PREFIX']
         job_name = os.environ['JOB_NAME']
         region = os.environ['REGION']
-        GcpBatch.run_job(job_id, bucket, prefix, job_name, region)
+        GcpBatch.run_job(job_id, gcs_bucket, gcs_prefix, job_name, region)
     else:
         parser = argparse.ArgumentParser()
         parser.add_argument('project_filename')
