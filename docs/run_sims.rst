@@ -156,6 +156,8 @@ has completed or is still running.
 Cleaning up after yourself
 ..........................
 
+TODO: Review and update this after implementing cleanup option.
+
 When the simulation and postprocessing is all complete, run ``buildstock_gcp
 --clean your_project_file.yml``. This will clean up all the GCP resources that
 were created to run the specified project. If the project is still running, it
