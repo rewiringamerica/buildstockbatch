@@ -20,17 +20,17 @@ references: map(required=False)
 ---
 gcp-spec:
   job_identifier: regex('^[a-zA-Z_-]\w{,20}$', required=True)
-  gcp_project: str(required=False)
+  gcp_project: str(required=True)
   region: str(required=True)
   artifact_registry: include('gcp-ar-spec', required=True)
   batch_array_size: num(min=1, max=10000, required=True)
   notifications_email: regex('^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$', name='email', required=True)
-  gcs: include('gcs-spec', required=False)
+  gcs: include('gcs-spec', required=True)
   use_spot: bool(required=False)
 
 gcs-spec:
-  bucket: str(required=False)
-  prefix: str(required=False)
+  bucket: str(required=True)
+  prefix: str(required=True)
 
 gcp-ar-spec:
   repository: str(required=True)

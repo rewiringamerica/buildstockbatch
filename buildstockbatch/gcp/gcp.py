@@ -491,7 +491,6 @@ def main():
 
         batch = GcpBatch(args.project_filename)
         if args.clean:
-            logger.info('Cleaning up...')
             # TODO: clean up resources
             # Run `terraform destroy` (But make sure outputs aren't deleted!)
             # Note: cleanup also requires the project input file, and only should only clean
