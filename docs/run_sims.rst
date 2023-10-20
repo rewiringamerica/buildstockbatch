@@ -132,14 +132,15 @@ file, something like this:
 
     gcp:
       job_identifier: national01
+      gcp_project: myorg_project
+      region: us-central1
+      artifact_registry: buildstockbatch
       gcs:
         bucket: mybucket
         prefix: national01_run01
-      gcp_project: myorg_project
       use_spot: true
       batch_array_size: 10000
       notifications_email: your_email@somewhere.com
-      region: us-central1
 
 See :ref:`gcp-config` for details.
 
