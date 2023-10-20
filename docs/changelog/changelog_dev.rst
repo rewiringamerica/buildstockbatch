@@ -23,6 +23,15 @@ Development Changelog
         Removing broken postprocessing tests.
 
     .. change::
+        :tags: general, bugfix
+        :pullreq: 384
+
+        Introduce '*' as a valid option name in options_lookup.tsv to indicate a
+        parameter that can take any option and don't need to pass arguments to 
+        measures. Enables buildstock.csv validation for ComStock without blowing
+        up the size of the options_lookup.tsv file.
+
+    .. change::
         :tags: bugfix
         :pullreq: 386
         :tickets: 256
@@ -66,3 +75,19 @@ Development Changelog
 
         Remove default addition of SimulationOutputReport from ComStock workflow generator to avoid multiple instances
         when also included in YML. SimulationOutputReport measure must be included in YML to be added to workflow.
+
+    .. change::
+        :tags: eagle, bugfix
+        :tickets: 393
+        :pullreq: 397
+
+        Updating validation for Eagle output directory to include
+        ``/lustre/eaglefs`` directories.
+
+    .. change::
+        :tags: eagle, bugfix
+        :pullreq: 398
+        :tickets: 390
+
+        No longer errors out with a "no space left on device" when using the
+        ``weather_files_url`` on Eagle.
