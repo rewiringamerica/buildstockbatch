@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 """
 buildstockbatch.gcp
 ~~~~~~~~~~~~~~~
@@ -14,7 +15,6 @@ likely to be refactored out will be commented with 'todo: aws-shared'.
 :copyright: (c) 2023 by The Alliance for Sustainable Energy
 :license: BSD-3
 """
-
 import argparse
 from datetime import datetime
 import docker
@@ -73,15 +73,16 @@ class GcpBatch(DockerBatchBase):
         self.job_identifier = re.sub('[^0-9a-zA-Z-]+', '_', self.cfg['gcp']['job_identifier'])[:20]
 
         self.project_filename = project_filename
+        self.gcp_project = self.cfg['gcp']['gcp_project']
         self.region = self.cfg['gcp']['region']
         self.ar_repo = self.cfg['gcp']['artifact_registry']['repository']
+        self.bucket = self.cfg['gcp']['gcs']['bucket']
+        self.prefix = self.cfg['gcp']['gcs']['prefix']
 
+        # Add timestamp to job ID, since duplicates aren't allowed (even between finished and new jobs)
         # TODO: stop appending timestamp here - it's useful for testing, but we should probably
         # make users choose a unique job ID each time.
         self.unique_job_id = self.job_identifier + datetime.utcnow().strftime('%y-%m-%d-%H%M%S')
-        self.gcp_project = self.cfg['gcp']['gcp_project']
-        self.bucket = self.cfg['gcp']['gcs']['bucket']
-        self.prefix = self.cfg['gcp']['gcs']['prefix']
 
     @staticmethod
     def validate_gcp_args(project_file):
@@ -249,6 +250,8 @@ class GcpBatch(DockerBatchBase):
         """
         List existing GCP Batch jobs that match the provided project.
         """
+        # TODO: this only shows jobs that exist in GCP Batch - update it to also
+        # show any post-processing steps that may be running.
         client = batch_v1.BatchServiceClient()
 
         request = batch_v1.ListJobsRequest()
@@ -265,8 +268,6 @@ class GcpBatch(DockerBatchBase):
             s.append(f'UID: {job.uid}')
             s.append(f'Status: {str(job.status.state)}')
             logger.info('\n '.join(s))
-        # TODO: this only shows jobs that exist in GCP Batch - update it to also
-        # show any post-processing steps that may be running.
 
     def run_batch(self):
         """
@@ -282,16 +283,14 @@ class GcpBatch(DockerBatchBase):
         # buildstock_csv_filename = self.sampler.run_sampling()
 
         # TODO: Step 2: Upload weather data and any other required files to GCP
-        # TODO: split samples into smaller batches to be run by individual tasks
+        # TODO: split samples into smaller batches to be run by individual tasks (reuse logic from aws.py)
 
         # Step 3: Define and run the GCP Batch job.
         client = batch_v1.BatchServiceClient()
 
         runnable = batch_v1.Runnable()
-        # Define what the job should actually do - takes a container or a script
         runnable.container = batch_v1.Runnable.Container()
-        # TODO: Use the docker image pushed earlier.
-        # runnable.container.image_uri = 'gcr.io/google-containers/busybox'
+        # TODO: Use the docker image pushed earlier instead of this hardcoded image.
         runnable.container.image_uri = 'us-central1-docker.pkg.dev/buildstockbatch-dev/buildstockbatch-docker/buildstockbatch'
         runnable.container.entrypoint = '/bin/sh'
 
@@ -305,10 +304,7 @@ class GcpBatch(DockerBatchBase):
         # TODO: Update to run batches of openstudio with something like "python3 -m buildstockbatch.gcp.gcp"
         runnable.container.commands = [
         "-c",
-            # Very basic test script
-            # "mkdir /mnt/disks/share/${JOB_ID}; echo Hello world! This is task ${BATCH_TASK_INDEX}. This job has a total of ${BATCH_TASK_COUNT} tasks. > /mnt/disks/share/${JOB_ID}/output_${BATCH_TASK_INDEX}.txt"
-
-            # Test script that checks whether openstudio is installed
+            # Test script that checks whether openstudio is installed and writes to a file in GCS.
             "mkdir /mnt/disks/share/${JOB_ID}; openstudio --help > /mnt/disks/share/${JOB_ID}/output_${BATCH_TASK_INDEX}.txt"
     ]
 
@@ -320,25 +316,24 @@ class GcpBatch(DockerBatchBase):
             mount_path = '/mnt/disks/share',
         )
 
-        # TODO: Allow specifying resources from the project YAML file
+        # TODO: Allow specifying resources from the project YAML file, plus pick better defaults.
         resources = batch_v1.ComputeResource(
             cpu_milli = 1000,
             memory_mib = 1,
         )
 
         task = batch_v1.TaskSpec(
-            # Each task executes this list of runnables
             runnables = [runnable],
             volumes = [gcs_volume],
             compute_resource = resources,
-            # TODO: check what happens if this fails (e.g. will it leave behind unwanted files?)
+            # TODO: Confirm what happens if this fails repeatedly, or for only some tasks, and document it.
             max_retry_count = 2,
             # TODO: How long does this timeout need to be?
             max_run_duration = '60s'
         )
 
         # How many of these tasks to run.
-        # TODO: determine this count when splitting up samples
+        # TODO: determine this count above, when splitting up samples.
         task_count = 3
         group = batch_v1.TaskGroup(
             task_count = task_count,
@@ -347,8 +342,7 @@ class GcpBatch(DockerBatchBase):
 
         # Specify types of VMs to run on
         # TODO: look into best default machine type for running OpenStudio, but also allow
-        # changing via the project config
-        # https://cloud.google.com/compute/docs/machine-types
+        # changing via the project config. https://cloud.google.com/compute/docs/machine-types
         policy = batch_v1.AllocationPolicy.InstancePolicy(
             machine_type = 'e2-standard-2',
         )
@@ -370,7 +364,7 @@ class GcpBatch(DockerBatchBase):
         # Send notifications to pub/sub when the job's state changes
         # TODO: Turn these into emails if an email address is provided?
         job.notifications = [batch_v1.JobNotification(
-            # TODO: Get topic from config or create a new one as needed.
+            # TODO: Get topic from config or create a new one as needed (via terraform)
             pubsub_topic = 'projects/buildstockbatch-dev/topics/notifications',
             message = batch_v1.JobNotification.Message(
                 type_ = 1,
@@ -380,8 +374,6 @@ class GcpBatch(DockerBatchBase):
 
         create_request = batch_v1.CreateJobRequest()
         create_request.job = job
-        # Add timestamp to job ID, since duplicates aren't allowed (even between finished and new jobs)
-        # TODO: Or check for existing job and enforce that the ID provided is unique?
         create_request.job_id = self.unique_job_id
         create_request.parent = f'projects/{self.gcp_project}/locations/{self.region}'
 
