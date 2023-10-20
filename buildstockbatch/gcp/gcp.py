@@ -69,11 +69,11 @@ class GcpBatch(DockerBatchBase):
     def __init__(self, project_filename):
         super().__init__(project_filename)
 
-        self.job_identifier = re.sub('[^0-9a-zA-Z]+', '_', self.cfg['gcp']['job_identifier'])[:10]
+        # TODO: how short does this really need to be? What characters are allowed?
+        self.job_identifier = re.sub('[^0-9a-zA-Z-]+', '_', self.cfg['gcp']['job_identifier'])[:20]
 
         self.project_filename = project_filename
         self.region = self.cfg['gcp']['region']
-        self.project = self.cfg['gcp']['project']
         self.ar_repo = self.cfg['gcp']['artifact_registry']['repository']
 
         # TODO: stop appending timestamp here - it's useful for testing, but we should probably
@@ -120,7 +120,7 @@ class GcpBatch(DockerBatchBase):
             "buildstockbatch"; for example,
              `us-central1-docker.pkg.dev/buildstockbatch/buildstockbatch-docker/buildstockbatch`
         """
-        return f"{self.region}-docker.pkg.dev/{self.project}/{self.ar_repo}/buildstockbatch"
+        return f"{self.region}-docker.pkg.dev/{self.gcp_project}/{self.ar_repo}/buildstockbatch"
 
     # todo: aws-shared (see file comment)
     def build_image(self):
@@ -245,72 +245,86 @@ class GcpBatch(DockerBatchBase):
         pass
 
 
-    def list_jobs(self, verbose):
-        """List existing GCP Batch jobs that match the provided project"""
+    def list_jobs(self):
+        """
+        List existing GCP Batch jobs that match the provided project.
+        """
         client = batch_v1.BatchServiceClient()
 
         request = batch_v1.ListJobsRequest()
         request.parent = f'projects/{self.gcp_project}/locations/{self.region}'
         request.filter = f'name:{request.parent}/jobs/{self.job_identifier}'
         request.order_by = 'create_time desc'
-        print(f'Showing existing jobs that match: {request.filter}\n')
+        logger.info(f'Showing existing jobs that match: {request.filter}\n')
         response = client.list_jobs(request)
         for job in response.jobs:
-            if verbose:
-                print(job)
-            else:
+            logger.debug(job)
 
-                def format_job(job):
-                    s = ['']
-                    s.append(f'Name: {job.name}')
-                    s.append(f'UID: {job.uid}')
-                    s.append(f'Status: {str(job.status.state)}')
-                    return '\n  '.join(s)
-
-                print(format_job(job))
-
-        # TODO: this only shows jobs still running in GCP Batch - update it to also
+            s = ['']
+            s.append(f'Name: {job.name}')
+            s.append(f'UID: {job.uid}')
+            s.append(f'Status: {str(job.status.state)}')
+            logger.info('\n '.join(s))
+        # TODO: this only shows jobs that exist in GCP Batch - update it to also
         # show any post-processing steps that may be running.
 
     def run_batch(self):
-        # Run sampling and split up buildings into batches.
-        # TODO: run this sampling
+        """
+        Start the GCP Batch job to run all the building simulations.
+
+        This will
+            - perform the sampling
+            - package and upload the assets, including weather
+            - kick off a batch simulation on GCP
+        """
+        # Step 1: Run sampling and split up buildings into batches.
+        # TDOO: Generate buildstock.csv
         # buildstock_csv_filename = self.sampler.run_sampling()
 
-        # Set up a new GCP Batch job
+        # TODO: Step 2: Upload weather data and any other required files to GCP
+        # TODO: split samples into smaller batches to be run by individual tasks
+
+        # Step 3: Define and run the GCP Batch job.
         client = batch_v1.BatchServiceClient()
 
         runnable = batch_v1.Runnable()
         # Define what the job should actually do - takes a container or a script
         runnable.container = batch_v1.Runnable.Container()
-        # TODO: Use the docker image pushed earlier. busybox is a minimal unix image good for testing
-        runnable.container.image_uri = 'gcr.io/google-containers/busybox'
+        # TODO: Use the docker image pushed earlier.
+        # runnable.container.image_uri = 'gcr.io/google-containers/busybox'
+        runnable.container.image_uri = 'us-central1-docker.pkg.dev/buildstockbatch-dev/buildstockbatch-docker/buildstockbatch'
         runnable.container.entrypoint = '/bin/sh'
 
         # Pass environment variables to each task
         environment = batch_v1.Environment()
         # TODO: What other env vars need to exist for run_job() below?
+        # BATCH_TASK_INDEX and BATCH_TASK_COUNT env vars are automatically made available.
         environment.variables = {'JOB_ID': self.unique_job_id}
         runnable.environment = environment
 
-        # BATCH_TASK_INDEX and BATCH_TASK_COUNT env vars are automatically made available
         # TODO: Update to run batches of openstudio with something like "python3 -m buildstockbatch.gcp.gcp"
         runnable.container.commands = [
         "-c",
-            "mkdir /mnt/disks/share/${JOB_ID}; echo Hello world! This is task ${BATCH_TASK_INDEX}. This job has a total of ${BATCH_TASK_COUNT} tasks. > /mnt/disks/share/${JOB_ID}/output_${BATCH_TASK_INDEX}.txt"
+            # Very basic test script
+            # "mkdir /mnt/disks/share/${JOB_ID}; echo Hello world! This is task ${BATCH_TASK_INDEX}. This job has a total of ${BATCH_TASK_COUNT} tasks. > /mnt/disks/share/${JOB_ID}/output_${BATCH_TASK_INDEX}.txt"
+
+            # Test script that checks whether openstudio is installed
+            "mkdir /mnt/disks/share/${JOB_ID}; openstudio --help > /mnt/disks/share/${JOB_ID}/output_${BATCH_TASK_INDEX}.txt"
     ]
 
         # Mount GCS Bucket, so we can use it like a normal directory.
         gcs_bucket = batch_v1.GCS(remote_path=self.bucket)
-        gcs_volume = batch_v1.Volume(gcs = gcs_bucket)
         # Note: 'mnt/share/' is read-only, but 'mnt/disks/share' works
-        gcs_volume.mount_path = '/mnt/disks/share'
-
+        gcs_volume = batch_v1.Volume(
+            gcs = gcs_bucket,
+            mount_path = '/mnt/disks/share',
+        )
 
         # TODO: Allow specifying resources from the project YAML file
-        resources = batch_v1.ComputeResource()
-        resources.cpu_milli = 1000
-        resources.memory_mib = 1
+        resources = batch_v1.ComputeResource(
+            cpu_milli = 1000,
+            memory_mib = 1,
+        )
 
         task = batch_v1.TaskSpec(
             # Each task executes this list of runnables
@@ -323,21 +337,25 @@ class GcpBatch(DockerBatchBase):
             max_run_duration = '60s'
         )
 
-        group = batch_v1.TaskGroup()
         # How many of these tasks to run.
-        group.task_count = 3
-        group.task_spec = task
+        # TODO: determine this count when splitting up samples
+        task_count = 3
+        group = batch_v1.TaskGroup(
+            task_count = task_count,
+            task_spec = task,
+        )
 
         # Specify types of VMs to run on
-        policy = batch_v1.AllocationPolicy.InstancePolicy()
-        # TODO: look into best default machine type for running OpenStudio
+        # TODO: look into best default machine type for running OpenStudio, but also allow
+        # changing via the project config
         # https://cloud.google.com/compute/docs/machine-types
-        policy.machine_type = 'e2-standard-2'
-        instances = batch_v1.AllocationPolicy.InstancePolicyOrTemplate()
-        instances.policy = policy
-        allocation_policy = batch_v1.AllocationPolicy()
-        allocation_policy.instances = [instances]
-        # TODO: Add option to set service account?
+        policy = batch_v1.AllocationPolicy.InstancePolicy(
+            machine_type = 'e2-standard-2',
+        )
+        instances = batch_v1.AllocationPolicy.InstancePolicyOrTemplate(policy=policy)
+        allocation_policy = batch_v1.AllocationPolicy(instances = [instances])
+        # TODO: Add option to set service account that runs the job?
+        # Otherwise uses the project's default compute engine service account.
         # allocation_policy.service_account = batch_v1.ServiceAccount(email = '')
 
         # Define the batch job
@@ -348,9 +366,11 @@ class GcpBatch(DockerBatchBase):
         job.labels = {'env': 'testing', 'type': 'script'}
         job.logs_policy = batch_v1.LogsPolicy()
         job.logs_policy.destination = batch_v1.LogsPolicy.Destination.CLOUD_LOGGING
+
         # Send notifications to pub/sub when the job's state changes
-        # TODO: Turn these into emails is an email address is provided
+        # TODO: Turn these into emails if an email address is provided?
         job.notifications = [batch_v1.JobNotification(
+            # TODO: Get topic from config or create a new one as needed.
             pubsub_topic = 'projects/buildstockbatch-dev/topics/notifications',
             message = batch_v1.JobNotification.Message(
                 type_ = 1,
@@ -368,9 +388,8 @@ class GcpBatch(DockerBatchBase):
         # Start the job!
         created_job = client.create_job(create_request)
 
-        logger.info(created_job)
-
-        logger.info('Newly created job info:')
+        logger.debug(created_job)
+        logger.info('Newly created GCP Batch job')
         logger.info(f'Job name: {created_job.name}')
         logger.info(f'Job UID: {created_job.uid}')
 
@@ -471,6 +490,12 @@ def main():
         )
         args = parser.parse_args()
 
+        if args.verbose:
+            logger.setLevel(logging.DEBUG)
+        else:
+            logger.setLevel(logging.INFO)
+
+
         # validate the project, and in case of the --validateonly flag return True if validation passes
         GcpBatch.validate_project(os.path.abspath(args.project_filename))
         if args.validateonly:
@@ -487,7 +512,7 @@ def main():
             batch.cleanup()
             return
         if args.list_jobs:
-            batch.list_jobs(verbose=args.verbose)
+            batch.list_jobs()
             return
         elif args.postprocessonly:
             batch.build_image()

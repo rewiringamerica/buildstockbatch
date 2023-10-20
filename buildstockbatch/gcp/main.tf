@@ -1,3 +1,6 @@
+# Terraform file to define GCP resources used by buildstock_gcp
+# TODO: Clean up, add better comments, and use this in gcp.py.
+
 variable "gcp_project" {
     type = string
     description = "GCP project to use"
@@ -30,9 +33,10 @@ provider "google" {
   # zone    = "us-central1-c"
 }
 
-# TODO: compute engine VMs?
-# Or are these created by GCP Batch?
-
+# Pub/sub topic for job notifications
+resource "google_pubsub_topic" "notification_topic" {
+    name = var.topic_name
+}
 
 # GCS bucket
 resource "google_storage_bucket" "bucket" {
@@ -41,11 +45,6 @@ resource "google_storage_bucket" "bucket" {
     force_destroy = false
 
     uniform_bucket_level_access = true
-}
-
-# Pub/sub topic for job notifications
-resource "google_pubsub_topic" "notification_topic" {
-    name = var.topic_name
 }
 
 
