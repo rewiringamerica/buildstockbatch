@@ -387,15 +387,13 @@ class GcpBatch(DockerBatchBase):
 
 
     @classmethod
-    def run_job(self, job_id, bucket, prefix, job_name, region):
-        """
+    def run_job(self, job_id, bucket, prefix, job_name, region): """
         Run a few simulations inside a container.
 
         This method is called from inside docker container in GCP compute engine.
-        It will go get the necessary files from GCS, run the simulation, and write the
+        It will read the necessary files from GCS, run the simulation, and write the
         results back to GCS.
         """
-        # TODO: move this somewhere else?
         pass
 
 
@@ -432,19 +430,17 @@ def main():
         },
     })
     print(GcpBatch.LOGO)
-    # If this var exists, we're inside a single batch task
-    # TODO: Would it be cleaner to move this to a main() in another file?
     if 'BATCH_TASK_INDEX' in os.environ:
+        # If this var exists, we're inside a single batch task.
+        # TODO: Would it be cleaner to move this to a main() in another file?
         job_id = int(os.environ['BATCH_TASK_INDEX'])
         # TODO: pass in these env vars to tasks
         # TODO: shouldn't need bucket, if we mount the directory - just read like a normal file
-        bucket = ''
-        prefix = ''
-        job_name = os.environ['JOB_NAMEk']
-        region = ''
+        bucket = os.environ['GCS_BUCKET']
+        prefix = os.environ['GCS_PREFIX']
+        job_name = os.environ['JOB_NAME']
+        region = os.environ['REGION']
         GcpBatch.run_job(job_id, bucket, prefix, job_name, region)
-    #   ...run one batch
-    # otherwise...
     else:
         parser = argparse.ArgumentParser()
         parser.add_argument('project_filename')

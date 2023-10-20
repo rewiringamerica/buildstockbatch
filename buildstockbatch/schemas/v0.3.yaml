@@ -8,7 +8,6 @@ workflow_generator: include('workflow-generator-spec', required=True)
 eagle: include('hpc-spec', required=False)
 gcp: include('gcp-spec', required=False)
 aws: include('aws-spec', required=False)
-gcp: include('gcp-spec', required=False)
 output_directory: regex('^(.*\/)?[a-z][a-z0-9_]*\/?$', required=True)
 sys_image_dir: str(required=False)
 baseline: include('sim-spec', required=True)
@@ -21,12 +20,12 @@ references: map(required=False)
 ---
 gcp-spec:
   job_identifier: regex('^[a-zA-Z_-]\w{,20}$', required=True)
+  gcp_project: str(required=False)
   region: str(required=True)
   artifact_registry: include('gcp-ar-spec', required=True)
   batch_array_size: num(min=1, max=10000, required=True)
   notifications_email: regex('^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$', name='email', required=True)
   gcs: include('gcs-spec', required=False)
-  gcp_project: str(required=False)
   use_spot: bool(required=False)
 
 gcs-spec:
