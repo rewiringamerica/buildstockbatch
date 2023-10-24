@@ -44,12 +44,8 @@ class DockerBatchBase(BuildStockBatchBase):
         try:
             self.docker_client.ping()
         except:  # noqa: E722 (allow bare except in this case because error can be a weird non-class Windows API error)
-            logger.error(
-                'The docker server did not respond, make sure Docker Desktop is started then retry.'
-            )
-            raise RuntimeError(
-                'The docker server did not respond, make sure Docker Desktop is started then retry.'
-            )
+            logger.error('The docker server did not respond, make sure Docker Desktop is started then retry.')
+            raise RuntimeError('The docker server did not respond, make sure Docker Desktop is started then retry.')
 
     @staticmethod
     def validate_project(project_file):
@@ -84,8 +80,7 @@ class GcpBatch(DockerBatchBase):
         self.gcs_prefix = self.cfg['gcp']['gcs']['prefix']
         self.use_spot = self.cfg['gcp']['use_spot']
 
-        # Add timestamp to job ID, since duplicates aren't allowed
-        # (even between finished and new jobs)
+        # Add timestamp to job ID, since duplicates aren't allowed (even between finished and new jobs)
         # TODO: stop appending timestamp here - it's useful for testing, but we should probably
         # make users choose a unique job ID each time.
         self.unique_job_id = self.job_identifier + datetime.utcnow().strftime('%y-%m-%d-%H%M%S')
@@ -148,9 +143,7 @@ class GcpBatch(DockerBatchBase):
             # Ensure the custom Gemfile exists in the buildstock dir
             local_gemfile_path = os.path.join(self.buildstock_dir, 'resources', 'Gemfile')
             if not os.path.exists(local_gemfile_path):
-                raise AttributeError(
-                    f'baseline:custom_gems = True, but did not find Gemfile at {local_gemfile_path}'
-                )
+                raise AttributeError(f'baseline:custom_gems = True, but did not find Gemfile at {local_gemfile_path}')
 
             # Copy the custom Gemfile into the buildstockbatch repo
             bsb_root = os.path.join(os.path.abspath(__file__), os.pardir, os.pardir, os.pardir)
@@ -281,8 +274,7 @@ class GcpBatch(DockerBatchBase):
         # buildstock_csv_filename = self.sampler.run_sampling()
 
         # TODO: Step 2: Upload weather data and any other required files to GCP
-        # TODO: split samples into smaller batches to be run by individual tasks
-        # (reuse logic from aws.py)
+        # TODO: split samples into smaller batches to be run by individual tasks (reuse logic from aws.py)
 
         # Step 3: Define and run the GCP Batch job.
         client = batch_v1.BatchServiceClient()
@@ -302,8 +294,7 @@ class GcpBatch(DockerBatchBase):
         environment.variables = {'JOB_ID': self.unique_job_id}
         runnable.environment = environment
 
-        # TODO: Update to run batches of openstudio with something like
-        # "python3 -m buildstockbatch.gcp.gcp"
+        # TODO: Update to run batches of openstudio with something like "python3 -m buildstockbatch.gcp.gcp"
         runnable.container.commands = [
             "-c",
             # Test script that checks whether openstudio is installed and writes to a file in GCS.
@@ -329,8 +320,7 @@ class GcpBatch(DockerBatchBase):
             runnables=[runnable],
             volumes=[gcs_volume],
             compute_resource=resources,
-            # TODO: Confirm what happens if this fails repeatedly, or for only
-            # some tasks, and document it.
+            # TODO: Confirm what happens if this fails repeatedly, or for only some tasks, and document it.
             max_retry_count=2,
             # TODO: How long does this timeout need to be?
             max_run_duration='60s',
