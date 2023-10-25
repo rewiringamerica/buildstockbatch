@@ -45,6 +45,7 @@ setuptools.setup(
         'awsretry',
         'lxml',
         'google-cloud-batch',
+        'google-cloud-storage',
     ],
     extras_require={
         'dev': [

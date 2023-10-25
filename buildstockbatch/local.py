@@ -247,6 +247,7 @@ class LocalBatch(BuildStockBatchBase):
 
     def run_batch(self, n_jobs=None, measures_only=False, sampling_only=False):
         buildstock_csv_filename = self.sampler.run_sampling()
+        breakpoint()
 
         if sampling_only:
             return
