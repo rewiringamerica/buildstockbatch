@@ -19,7 +19,7 @@ postprocessing: include('postprocessing-spec', required=False)
 references: map(required=False)
 ---
 gcp-spec:
-  job_identifier: regex('^[a-zA-Z_]\w{,9}$', required=True)
+  job_identifier: regex('^[a-zA-Z]\w{,9}$', required=True)
   project: str(required=True)
   region: str(required=True)
   artifact_registry: include('gcp-ar-spec', required=True)
@@ -36,7 +36,7 @@ gcp-ar-spec:
   repository: str(required=True)
 
 aws-spec:
-  job_identifier: regex('^[a-zA-Z_]\w{,9}$', required=True)
+  job_identifier: regex('^[a-zA-Z]\w{,9}$', required=True)
   s3: include('s3-aws-postprocessing-spec', required=True)
   region: str(required=True)
   use_spot: bool(required=False)
