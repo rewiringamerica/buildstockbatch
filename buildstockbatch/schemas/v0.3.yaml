@@ -19,14 +19,14 @@ postprocessing: include('postprocessing-spec', required=False)
 references: map(required=False)
 ---
 gcp-spec:
-  job_identifier: regex('^[a-zA-Z_-]\w{,20}$', required=True)
-  gcp_project: str(required=True)
+  job_identifier: regex('^[a-zA-Z]\w{,9}$', required=True)
+  project: str(required=True)
   region: str(required=True)
   artifact_registry: include('gcp-ar-spec', required=True)
   batch_array_size: num(min=1, max=10000, required=True)
   notifications_email: regex('^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$', name='email', required=True)
   gcs: include('gcs-spec', required=True)
-  use_spot: bool(required=False)
+  use_spot: bool(required=True)
 
 gcs-spec:
   bucket: str(required=True)
