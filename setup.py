@@ -39,6 +39,7 @@ setuptools.setup(
         'dask[complete]>=2022.10.0',
         'docker',
         's3fs[boto3]',
+        'gcsfs',
         'fsspec',
         'yamale',
         'ruamel.yaml',
