@@ -78,22 +78,21 @@ def upload_directory_to_GCS(local_directory, bucket, prefix):
 
     local_dir_abs = pathlib.Path(local_directory).absolute()
 
-    def filename_generator():
-        for dirpath, dirnames, filenames in os.walk(local_dir_abs):
-            for filename in filenames:
-                if filename.startswith('.'):
-                    continue
-                local_filepath = pathlib.Path(dirpath, filename)
-                yield str(local_filepath.relative_to(local_dir_abs))
+    string_paths = []
+    for dirpath, dirnames, filenames in os.walk(local_dir_abs):
+        for filename in filenames:
+            if filename.startswith('.'):
+                continue
+            local_filepath = pathlib.Path(dirpath, filename)
+            string_paths.append(str(local_filepath.relative_to(local_dir_abs)))
 
-    string_paths = list(filename_generator())
-
-    # https://cloud.google.com/storage/docs/uploading-objects#storage-upload-object-python
-    results = transfer_manager.upload_many_from_filenames(
-        bucket, string_paths, source_directory=local_dir_abs, blob_name_prefix=prefix
+    transfer_manager.upload_many_from_filenames(
+        bucket,
+        string_paths,
+        source_directory=local_dir_abs,
+        blob_name_prefix=prefix,
+        raise_exception=True,
     )
-    _ = results
-    # TODO: check for errors in results
 
 
 # todo: aws-shared (see file comment)
@@ -109,12 +108,12 @@ def calc_hash_for_file(filename):
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def copy_GCS_file(src_bucket, src_key, dest_bucket, dest_key):
+def copy_GCS_file(src_bucket, src_name, dest_bucket, dest_name):
     storage_client = storage.Client()
     source_bucket = storage_client.bucket(src_bucket)
-    source_blob = source_bucket.blob(src_key)
+    source_blob = source_bucket.blob(src_name)
     destination_bucket = storage_client.bucket(dest_bucket)
-    source_bucket.copy_blob(source_blob, destination_bucket, dest_key)
+    source_bucket.copy_blob(source_blob, destination_bucket, dest_name)
 
 
 class GcpBatch(DockerBatchBase):
@@ -478,7 +477,7 @@ class GcpBatch(DockerBatchBase):
         environment = batch_v1.Environment()
         # BATCH_TASK_INDEX and BATCH_TASK_COUNT env vars are automatically made available by GCP Batch.
         environment.variables = {
-            'JOB_ID': self.unique_job_id,
+            'JOB_ID': self.job_identifier,
             'GCS_PREFIX': self.gcs_prefix,
         }
         runnable.environment = environment
@@ -575,13 +574,13 @@ class GcpBatch(DockerBatchBase):
         """
         # Local directory where we'll write files
         sim_dir = pathlib.Path('/var/simdata/openstudio')
-        # Mounted GCS directory
+        # Mounted GCS bucket directory
         parent_dir = pathlib.Path('/mnt/disks/share') / gcs_prefix
 
         logger.info('Extracting assets TAR file')
         # Copy file to local machine to extract TAR file
-        shutil.copyfile(parent_dir / 'assets.tar.gz', sim_dir / 'assets.tar.gz')
         assets_file_path = sim_dir / 'assets.tar.gz'
+        shutil.copyfile(parent_dir / 'assets.tar.gz', assets_file_path)
         with tarfile.open(assets_file_path, 'r') as tar_f:
             tar_f.extractall(sim_dir)
 
