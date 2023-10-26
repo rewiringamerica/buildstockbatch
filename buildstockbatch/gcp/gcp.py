@@ -84,12 +84,6 @@ def upload_directory_to_GCS(local_directory, bucket, prefix):
                 if filename.startswith('.'):
                     continue
                 local_filepath = pathlib.Path(dirpath, filename)
-                # gcs_path = pathlib.PurePosixPath(
-                #   prefix,
-                #   local_filepath.relative_to(local_dir_abs)
-                # )
-                # yield local_filepath, s3_key
-                # yield str(gcs_path)
                 yield str(local_filepath.relative_to(local_dir_abs))
 
     string_paths = list(filename_generator())
@@ -153,6 +147,7 @@ class GcpBatch(DockerBatchBase):
         # make users choose a unique job ID each time.
         self.unique_job_id = self.job_identifier + datetime.utcnow().strftime('%y-%m-%d-%H%M%S')
 
+    # todo: aws-shared (see file comment)
     @property
     def weather_dir(self):
         return self._weather_dir
@@ -194,7 +189,7 @@ class GcpBatch(DockerBatchBase):
             "buildstockbatch"; for example,
              `us-central1-docker.pkg.dev/buildstockbatch/buildstockbatch-docker/buildstockbatch`
         """
-        return f"{self.region}-docker.pkg.dev/{self.gcp_project}/{self.ar_repo}/buildstockbatch:{self.job_identifier}"
+        return f"{self.region}-docker.pkg.dev/{self.gcp_project}/{self.ar_repo}/buildstockbatch"
 
     # todo: aws-shared (see file comment)
     def build_image(self):
@@ -346,7 +341,6 @@ class GcpBatch(DockerBatchBase):
 
         # Step 2: Compress and upload weather data and any other required files to GCP
         # todo: aws-shared (see file comment)
-        # Most of this function is identical to the AWS version
         with tempfile.TemporaryDirectory(prefix='bsb_') as tmpdir, tempfile.TemporaryDirectory(
             prefix='bsb_'
         ) as tmp_weather_dir:  # noqa: E501
@@ -381,9 +375,8 @@ class GcpBatch(DockerBatchBase):
             # Compress unique weather files
             logger.debug('Compressing weather files')
             Parallel(n_jobs=-1, verbose=9)(
-                # TODO: include all files
                 delayed(compress_file)(pathlib.Path(self.weather_dir) / x[0], str(weather_path / x[0]) + '.gz')
-                for x in list(unique_epws.values())[0:3]
+                for x in list(unique_epws.values())
             )
 
             logger.debug('Writing project configuration for upload')
@@ -398,8 +391,7 @@ class GcpBatch(DockerBatchBase):
             n_sims = n_datapoints * (len(self.cfg.get('upgrades', [])) + 1)
             logger.debug('Total number of simulations = {}'.format(n_sims))
 
-            # GCP Batch allows up to 100,000 tasks, but limit to 10,000 here
-            # for consistency with AWS implementation.
+            # GCP Batch allows up to 100,000 tasks, but limit to 10,000 here for consistency with AWS implementation.
             if self.batch_array_size <= 10000:
                 max_array_size = self.batch_array_size
             else:
@@ -463,11 +455,7 @@ class GcpBatch(DockerBatchBase):
 
         logger.debug('Copying weather files on GCS')
         bucket = self.gcs_bucket
-        Parallel(n_jobs=-1, verbose=9)(
-            # TODO: include all files
-            delayed(copy_GCS_file)(bucket, src, bucket, dest)
-            for src, dest in epws_to_copy[0:3]
-        )
+        Parallel(n_jobs=-1, verbose=9)(delayed(copy_GCS_file)(bucket, src, bucket, dest) for src, dest in epws_to_copy)
 
         # Create the output directories
         storage_client = storage.Client()
@@ -483,7 +471,7 @@ class GcpBatch(DockerBatchBase):
 
         runnable = batch_v1.Runnable()
         runnable.container = batch_v1.Runnable.Container()
-        runnable.container.image_uri = self.repository_uri
+        runnable.container.image_uri = self.repository_uri + ':' + self.job_identifier
         runnable.container.entrypoint = '/bin/sh'
 
         # Pass environment variables to each task
@@ -491,7 +479,6 @@ class GcpBatch(DockerBatchBase):
         # BATCH_TASK_INDEX and BATCH_TASK_COUNT env vars are automatically made available by GCP Batch.
         environment.variables = {
             'JOB_ID': self.unique_job_id,
-            'REGION': self.region,
             'GCS_PREFIX': self.gcs_prefix,
         }
         runnable.environment = environment
@@ -556,7 +543,7 @@ class GcpBatch(DockerBatchBase):
                 pubsub_topic='projects/buildstockbatch-dev/topics/notifications',
                 message=batch_v1.JobNotification.Message(
                     type_=1,
-                    new_job_state='STATE_UNSPECIFIED',  # notify on any changes(?)
+                    new_job_state='STATE_UNSPECIFIED',  # notify on any changes
                 ),
             )
         ]
@@ -569,22 +556,23 @@ class GcpBatch(DockerBatchBase):
         # Start the job!
         created_job = client.create_job(create_request)
 
-        logger.debug(created_job)
         logger.info('Newly created GCP Batch job')
         logger.info(f'Job name: {created_job.name}')
         logger.info(f'Job UID: {created_job.uid}')
 
     @classmethod
-    def run_job(cls, job_id, job_name, gcs_prefix, region):
+    def run_task(cls, task_index, job_name, gcs_prefix):
         """
         Run a few simulations inside a container.
 
         This method is called from inside docker container in GCP compute engine.
         It will read the necessary files from GCS, run the simulation, and write the
         results back to GCS.
-        """
-        # TODO: does -v flag turn off debug logs here?
 
+        :param task_index: Index of this task (e.g. this may be task 1 of 4)
+        :param job_name: Job identifier
+        :param gcs_prefix: Prefix used for GCS files
+        """
         # Local directory where we'll write files
         sim_dir = pathlib.Path('/var/simdata/openstudio')
         # Mounted GCS directory
@@ -594,7 +582,6 @@ class GcpBatch(DockerBatchBase):
         # Copy file to local machine to extract TAR file
         shutil.copyfile(parent_dir / 'assets.tar.gz', sim_dir / 'assets.tar.gz')
         assets_file_path = sim_dir / 'assets.tar.gz'
-        # TODO: extract once in main task? This does the same thing in each task
         with tarfile.open(assets_file_path, 'r') as tar_f:
             tar_f.extractall(sim_dir)
 
@@ -605,7 +592,7 @@ class GcpBatch(DockerBatchBase):
         logger.debug('Getting job information')
         jobs_file_path = parent_dir / 'jobs.tar.gz'
         with tarfile.open(jobs_file_path, 'r') as tar_f:
-            jobs_d = json.load(tar_f.extractfile(f'jobs/job{job_id:05d}.json'), encoding='utf-8')
+            jobs_d = json.load(tar_f.extractfile(f'jobs/job{task_index:05d}.json'), encoding='utf-8')
         logger.debug('Number of simulations = {}'.format(len(jobs_d['batch'])))
 
         logger.debug('Getting weather files')
@@ -640,8 +627,7 @@ class GcpBatch(DockerBatchBase):
                 if int(row['Building']) in building_ids:
                     epws_to_download.add(epws_by_option[row[param_name]])
 
-        # Download and unzip the epws needed for these simulations
-        # TODO: use sh.gunzip?
+        # Copy files to local machine and unzip the epws needed for these simulations
         for epw_filename in epws_to_download:
             # Remove extra directories from path
             epw_filename = epw_filename.split('/')[-1]
@@ -714,11 +700,11 @@ class GcpBatch(DockerBatchBase):
                         os.remove(item)
 
         shutil.copyfile(
-            simulation_output_tar_filename, parent_dir / f'results/simulation_output/simulations_job{job_id}.tar.gz'
+            simulation_output_tar_filename, parent_dir / f'results/simulation_output/simulations_job{task_index}.tar.gz'
         )
 
         # Upload aggregated dpouts as a json file
-        with open(parent_dir / f'results/simulation_output/results_job{job_id}.json.gz', 'wb') as f1:
+        with open(parent_dir / f'results/simulation_output/results_job{task_index}.json.gz', 'wb') as f1:
             with gzip.open(f1, 'wt', encoding='utf-8') as f2:
                 json.dump(dpouts, f2)
 
@@ -760,11 +746,10 @@ def main():
     print(GcpBatch.LOGO)
     if 'BATCH_TASK_INDEX' in os.environ:
         # If this var exists, we're inside a single batch task.
-        task_id = int(os.environ['BATCH_TASK_INDEX'])
+        task_index = int(os.environ['BATCH_TASK_INDEX'])
         gcs_prefix = os.environ['GCS_PREFIX']
         job_name = os.environ['JOB_ID']
-        region = os.environ['REGION']
-        GcpBatch.run_job(task_id, job_name, gcs_prefix, region)
+        GcpBatch.run_task(task_index, job_name, gcs_prefix)
     else:
         parser = argparse.ArgumentParser()
         parser.add_argument('project_filename')
@@ -781,13 +766,13 @@ def main():
             help='Only validate the project YAML file and references. Nothing is executed',
             action='store_true',
         )
+        group.add_argument('--list_jobs', help='List existing jobs', action='store_true')
         parser.add_argument(
             '-v',
             '--verbose',
             action='store_true',
             help='Verbose output - includes DEBUG logs if set',
         )
-        group.add_argument('--list_jobs', help='List existing jobs', action='store_true')
         group.add_argument(
             '--postprocessonly',
             help='Only do postprocessing, useful for when the simulations are already done',
