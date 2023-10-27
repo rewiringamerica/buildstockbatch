@@ -24,8 +24,8 @@ variable "gcp_project" {
 
 variable "bucket_name" {
   type        = string
-  description = "GCS bucket where buildstockbatch inputs and outputs should be stored"
   default     = "buildstockbatch"
+  description = "GCS bucket where buildstockbatch inputs and outputs should be stored"
 }
 
 variable "topic_name" {
@@ -69,6 +69,5 @@ resource "google_storage_bucket" "bucket" {
 resource "google_artifact_registry_repository" "AR_repo" {
   location      = var.region
   repository_id = var.artifact_registry_repository
-  description   = "For BuildStock Batch docker images"
   format        = "DOCKER"
 }
