@@ -340,6 +340,7 @@ class GcpBatch(DockerBatchBase):
 
         # Step 2: Compress and upload weather data and any other required files to GCP
         # todo: aws-shared (see file comment)
+        logger.info('Collecting and uploading input files')
         with tempfile.TemporaryDirectory(prefix='bsb_') as tmpdir, tempfile.TemporaryDirectory(
             prefix='bsb_'
         ) as tmp_weather_dir:  # noqa: E501
@@ -409,7 +410,7 @@ class GcpBatch(DockerBatchBase):
             os.makedirs(tmppath / 'jobs')
 
             # Write each batch of simulations to a file.
-            logger.info('Queueing jobs')
+            logger.info('Creating batches of jobs')
             for i in itertools.count(0):
                 batch = list(itertools.islice(all_sims_iter, n_sims_per_job))
                 if not batch:
@@ -449,7 +450,7 @@ class GcpBatch(DockerBatchBase):
             # The first in the list is already up there, copy the rest
             for filename in epws[1:]:
                 epws_to_copy.append(
-                    (f"{self.gcs_prefix}/weather/{epws[0]}.gz", f"{self.gcs_prefix}/weather/{filename}.gz")
+                    (f'{self.gcs_prefix}/weather/{epws[0]}.gz', f'{self.gcs_prefix}/weather/{filename}.gz')
                 )
 
         logger.debug('Copying weather files on GCS')
@@ -466,6 +467,7 @@ class GcpBatch(DockerBatchBase):
             blob.upload_from_string('')
 
         # Step 3: Define and run the GCP Batch job.
+        logger.info('Setting up GCP Batch job')
         client = batch_v1.BatchServiceClient()
 
         runnable = batch_v1.Runnable()
@@ -482,7 +484,7 @@ class GcpBatch(DockerBatchBase):
         }
         runnable.environment = environment
 
-        runnable.container.commands = ["-c", 'python3 -m buildstockbatch.gcp.gcp']
+        runnable.container.commands = ['-c', 'python3 -m buildstockbatch.gcp.gcp']
 
         # Mount GCS Bucket, so we can use it like a normal directory.
         gcs_bucket = batch_v1.GCS(remote_path=self.gcs_bucket)
@@ -514,6 +516,8 @@ class GcpBatch(DockerBatchBase):
         # TODO: look into best default machine type for running OpenStudio, but also allow
         # changing via the project config. https://cloud.google.com/compute/docs/machine-types
         policy = batch_v1.AllocationPolicy.InstancePolicy(
+            # TODO: Skip setting this and let GCP pick the right machine type
+            # based on resourcesin ComputeResource
             machine_type='e2-standard-2',
             provisioning_model=batch_v1.AllocationPolicy.ProvisioningModel.SPOT
             if self.use_spot
@@ -556,8 +560,8 @@ class GcpBatch(DockerBatchBase):
         created_job = client.create_job(create_request)
 
         logger.info('Newly created GCP Batch job')
-        logger.info(f'Job name: {created_job.name}')
-        logger.info(f'Job UID: {created_job.uid}')
+        logger.info(f'  Job name: {created_job.name}')
+        logger.info(f'  Job UID: {created_job.uid}')
 
     @classmethod
     def run_task(cls, task_index, job_name, gcs_prefix):
@@ -578,7 +582,7 @@ class GcpBatch(DockerBatchBase):
         parent_dir = pathlib.Path('/mnt/disks/share') / gcs_prefix
 
         logger.info('Extracting assets TAR file')
-        # Copy file to local machine to extract TAR file
+        # Copy assets file to local machine to extract TAR file
         assets_file_path = sim_dir / 'assets.tar.gz'
         shutil.copyfile(parent_dir / 'assets.tar.gz', assets_file_path)
         with tarfile.open(assets_file_path, 'r') as tar_f:
@@ -588,6 +592,7 @@ class GcpBatch(DockerBatchBase):
         with open(parent_dir / 'config.json') as f:
             cfg = json.load(f)
 
+        # Extract the job information for this particular task
         logger.debug('Getting job information')
         jobs_file_path = parent_dir / 'jobs.tar.gz'
         with tarfile.open(jobs_file_path, 'r') as tar_f:
@@ -628,8 +633,7 @@ class GcpBatch(DockerBatchBase):
 
         # Copy files to local machine and unzip the epws needed for these simulations
         for epw_filename in epws_to_download:
-            # Remove extra directories from path
-            epw_filename = epw_filename.split('/')[-1]
+            epw_filename = os.path.basename(epw_filename)
             with gzip.open(parent_dir / 'weather' / f'{epw_filename}.gz') as f_gz:
                 with open(sim_dir / 'weather' / epw_filename, 'wb') as f_out:
                     logger.debug(f'Extracting {epw_filename}')
