@@ -317,14 +317,14 @@ class GcpBatch(DockerBatchBase):
         request.parent = f'projects/{self.gcp_project}/locations/{self.region}'
         request.filter = f'name:{request.parent}/jobs/{self.job_identifier}'
         request.order_by = 'create_time desc'
-        logger.info(f'Showing existing jobs that match: {request.filter}\n')
+        request.page_size = 10
+        logger.info(f'Showing the first 10 existing jobs that match: {request.filter}\n')
         response = client.list_jobs(request)
         for job in response.jobs:
             logger.debug(job)
-
             logger.info(f'Name: {job.name}')
-            logger.info(f'UID: {job.uid}')
-            logger.info(f'Status: {str(job.status.state)}')
+            logger.info(f'  UID: {job.uid}')
+            logger.info(f'  Status: {job.status.state.name}')
 
     def run_batch(self):
         """
@@ -491,7 +491,7 @@ class GcpBatch(DockerBatchBase):
         # TODO: Allow specifying resources from the project YAML file, plus pick better defaults.
         resources = batch_v1.ComputeResource(
             cpu_milli=1000,
-            memory_mib=1,
+            memory_mib=2000,
         )
 
         task = batch_v1.TaskSpec(
@@ -501,7 +501,7 @@ class GcpBatch(DockerBatchBase):
             # TODO: Confirm what happens if this fails repeatedly, or for only some tasks, and document it.
             max_retry_count=2,
             # TODO: How long does this timeout need to be?
-            max_run_duration='600s',
+            max_run_duration='5000s',
         )
 
         # How many of these tasks to run.
