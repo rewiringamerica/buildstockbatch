@@ -459,15 +459,6 @@ class GcpBatch(DockerBatchBase):
         bucket = self.gcs_bucket
         Parallel(n_jobs=-1, verbose=9)(delayed(copy_GCS_file)(bucket, src, bucket, dest) for src, dest in epws_to_copy)
 
-        # Create the output directories
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(self.gcs_bucket)
-        for upgrade_id in range(len(self.cfg.get('upgrades', [])) + 1):
-            dir_name = f'{self.gcs_prefix}/results/simulation_output/timeseries/up{upgrade_id:02d}/'
-            blob = bucket.blob(dir_name)
-            # Note: GCS doesn't have real directories, so these are just empty files with names ending in '/'.
-            blob.upload_from_string('')
-
         # Step 3: Define and run the GCP Batch job.
         logger.info('Setting up GCP Batch job')
         client = batch_v1.BatchServiceClient()
@@ -481,7 +472,7 @@ class GcpBatch(DockerBatchBase):
         environment = batch_v1.Environment()
         # BATCH_TASK_INDEX and BATCH_TASK_COUNT env vars are automatically made available by GCP Batch.
         environment.variables = {
-            'JOB_ID': self.job_identifier,
+            'JOB_NAME': self.job_identifier,
             'GCS_PREFIX': self.gcs_prefix,
             'GCS_BUCKET': self.gcs_bucket,
         }
@@ -574,6 +565,7 @@ class GcpBatch(DockerBatchBase):
 
         :param task_index: Index of this task (e.g. this may be task 1 of 4)
         :param job_name: Job identifier
+        :param gcs_bucket: GCS bucket for input and output files
         :param gcs_prefix: Prefix used for GCS files
         """
         # Local directory where we'll write files
@@ -758,7 +750,7 @@ def main():
         task_index = int(os.environ['BATCH_TASK_INDEX'])
         gcs_bucket = os.environ['GCS_BUCKET']
         gcs_prefix = os.environ['GCS_PREFIX']
-        job_name = os.environ['JOB_ID']
+        job_name = os.environ['JOB_NAME']
         GcpBatch.run_task(task_index, job_name, gcs_bucket, gcs_prefix)
     else:
         parser = argparse.ArgumentParser()
