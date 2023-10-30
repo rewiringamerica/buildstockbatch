@@ -625,7 +625,7 @@ class GcpBatch(DockerBatchBase):
                 if int(row['Building']) in building_ids:
                     epws_to_download.add(epws_by_option[row[param_name]])
 
-        # Copy files to local machine and unzip the epws needed for these simulations
+        # Download and unzip the epws needed for these simulations
         for epw_filename in epws_to_download:
             epw_filename = os.path.basename(epw_filename)
             with io.BytesIO() as f_gz:
