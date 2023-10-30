@@ -46,6 +46,7 @@ setuptools.setup(
         'lxml',
         'google-cloud-batch',
         'google-cloud-storage',
+        'gcsfs',
     ],
     extras_require={
         'dev': [

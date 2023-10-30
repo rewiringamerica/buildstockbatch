@@ -21,10 +21,12 @@ import csv
 from datetime import datetime
 import docker
 from fsspec.implementations.local import LocalFileSystem
+import gcsfs
 import gzip
 import hashlib
 from joblib import Parallel, delayed
 import json
+import io
 import itertools
 import logging
 import math
@@ -146,11 +148,6 @@ class GcpBatch(DockerBatchBase):
         # make users choose a unique job ID each time.
         self.unique_job_id = self.job_identifier + datetime.utcnow().strftime('%y-%m-%d-%H%M%S')
 
-    # todo: aws-shared (see file comment)
-    @property
-    def weather_dir(self):
-        return self._weather_dir
-
     @staticmethod
     def validate_gcp_args(project_file):
         # TODO: validate GCP section of project definition, like region, machine type, etc
@@ -166,6 +163,11 @@ class GcpBatch(DockerBatchBase):
     @property
     def docker_image(self):
         return 'nrel/buildstockbatch'
+
+    # todo: aws-shared (see file comment)
+    @property
+    def weather_dir(self):
+        return self._weather_dir
 
     @property
     def registry_url(self):
@@ -481,14 +483,11 @@ class GcpBatch(DockerBatchBase):
         environment.variables = {
             'JOB_ID': self.job_identifier,
             'GCS_PREFIX': self.gcs_prefix,
+            'GCS_BUCKET': self.gcs_bucket,
         }
         runnable.environment = environment
 
         runnable.container.commands = ['-c', 'python3 -m buildstockbatch.gcp.gcp']
-
-        # Mount GCS Bucket, so we can use it like a normal directory.
-        gcs_bucket = batch_v1.GCS(remote_path=self.gcs_bucket)
-        gcs_volume = batch_v1.Volume(gcs=gcs_bucket, mount_path='/mnt/disks/share')
 
         # TODO: Allow specifying resources from the project YAML file, plus pick better defaults.
         resources = batch_v1.ComputeResource(
@@ -498,7 +497,6 @@ class GcpBatch(DockerBatchBase):
 
         task = batch_v1.TaskSpec(
             runnables=[runnable],
-            volumes=[gcs_volume],
             compute_resource=resources,
             # TODO: Confirm what happens if this fails repeatedly, or for only some tasks, and document it.
             max_retry_count=2,
@@ -517,11 +515,13 @@ class GcpBatch(DockerBatchBase):
         # changing via the project config. https://cloud.google.com/compute/docs/machine-types
         policy = batch_v1.AllocationPolicy.InstancePolicy(
             # TODO: Skip setting this and let GCP pick the right machine type
-            # based on resourcesin ComputeResource
+            # based on resources in ComputeResource
             machine_type='e2-standard-2',
-            provisioning_model=batch_v1.AllocationPolicy.ProvisioningModel.SPOT
-            if self.use_spot
-            else batch_v1.AllocationPolicy.ProvisioningModel.STANDARD,
+            provisioning_model=(
+                batch_v1.AllocationPolicy.ProvisioningModel.SPOT
+                if self.use_spot
+                else batch_v1.AllocationPolicy.ProvisioningModel.STANDARD
+            ),
         )
         instances = batch_v1.AllocationPolicy.InstancePolicyOrTemplate(policy=policy)
         allocation_policy = batch_v1.AllocationPolicy(instances=[instances])
@@ -564,7 +564,7 @@ class GcpBatch(DockerBatchBase):
         logger.info(f'  Job UID: {created_job.uid}')
 
     @classmethod
-    def run_task(cls, task_index, job_name, gcs_prefix):
+    def run_task(cls, task_index, job_name, gcs_bucket, gcs_prefix):
         """
         Run a few simulations inside a container.
 
@@ -578,23 +578,25 @@ class GcpBatch(DockerBatchBase):
         """
         # Local directory where we'll write files
         sim_dir = pathlib.Path('/var/simdata/openstudio')
-        # Mounted GCS bucket directory
-        parent_dir = pathlib.Path('/mnt/disks/share') / gcs_prefix
+
+        client = storage.Client()
+        bucket = client.get_bucket(gcs_bucket)
 
         logger.info('Extracting assets TAR file')
         # Copy assets file to local machine to extract TAR file
-        assets_file_path = sim_dir / 'assets.tar.gz'
-        shutil.copyfile(parent_dir / 'assets.tar.gz', assets_file_path)
+        assets_file_path = sim_dir.parent / 'assets.tar.gz'
+        bucket.blob(f'{gcs_prefix}/assets.tar.gz').download_to_filename(assets_file_path)
         with tarfile.open(assets_file_path, 'r') as tar_f:
             tar_f.extractall(sim_dir)
 
         logger.debug('Reading config')
-        with open(parent_dir / 'config.json') as f:
-            cfg = json.load(f)
+        blob = bucket.blob(f'{gcs_prefix}/config.json')
+        cfg = json.loads(blob.download_as_string())
 
         # Extract the job information for this particular task
         logger.debug('Getting job information')
-        jobs_file_path = parent_dir / 'jobs.tar.gz'
+        jobs_file_path = sim_dir.parent / 'jobs.tar.gz'
+        bucket.blob(f'{gcs_prefix}/jobs.tar.gz').download_to_filename(jobs_file_path)
         with tarfile.open(jobs_file_path, 'r') as tar_f:
             jobs_d = json.load(tar_f.extractfile(f'jobs/job{task_index:05d}.json'), encoding='utf-8')
         logger.debug('Number of simulations = {}'.format(len(jobs_d['batch'])))
@@ -634,12 +636,15 @@ class GcpBatch(DockerBatchBase):
         # Copy files to local machine and unzip the epws needed for these simulations
         for epw_filename in epws_to_download:
             epw_filename = os.path.basename(epw_filename)
-            with gzip.open(parent_dir / 'weather' / f'{epw_filename}.gz') as f_gz:
-                with open(sim_dir / 'weather' / epw_filename, 'wb') as f_out:
-                    logger.debug(f'Extracting {epw_filename}')
-                    f_out.write(f_gz.read())
-
+            with io.BytesIO() as f_gz:
+                logger.debug('Downloading {}.gz'.format(epw_filename))
+                bucket.blob(f'{gcs_prefix}/weather/{epw_filename}.gz').download_to_file(f_gz)
+                with open(weather_dir / epw_filename, 'wb') as f_out:
+                    logger.debug('Extracting {}'.format(epw_filename))
+                    f_out.write(gzip.decompress(f_gz.getvalue()))
         asset_dirs = os.listdir(sim_dir)
+
+        gcs_fs = gcsfs.GCSFileSystem()
         local_fs = LocalFileSystem()
         reporting_measures = cls.get_reporting_measures(cfg)
         dpouts = []
@@ -671,8 +676,8 @@ class GcpBatch(DockerBatchBase):
                 # Clean Up simulation directory
                 cls.cleanup_sim_dir(
                     sim_dir,
-                    local_fs,
-                    str(parent_dir / 'results' / 'simulation_output' / 'timeseries'),
+                    gcs_fs,
+                    f'{gcs_bucket}/{gcs_prefix}/results/simulation_output/timeseries',
                     upgrade_id,
                     building_id,
                 )
@@ -702,12 +707,13 @@ class GcpBatch(DockerBatchBase):
                     elif os.path.isfile(item):
                         os.remove(item)
 
-        shutil.copyfile(
-            simulation_output_tar_filename, parent_dir / f'results/simulation_output/simulations_job{task_index}.tar.gz'
-        )
+        blob = bucket.blob(f'{gcs_prefix}/results/simulation_output/simulations_job{task_index}.tar.gz')
+        blob.upload_from_filename(simulation_output_tar_filename)
 
         # Upload aggregated dpouts as a json file
-        with open(parent_dir / f'results/simulation_output/results_job{task_index}.json.gz', 'wb') as f1:
+        with gcs_fs.open(
+            f'{gcs_bucket}/{gcs_prefix}/results/simulation_output/results_job{task_index}.json.gz', 'wb'
+        ) as f1:
             with gzip.open(f1, 'wt', encoding='utf-8') as f2:
                 json.dump(dpouts, f2)
 
@@ -750,9 +756,10 @@ def main():
     if 'BATCH_TASK_INDEX' in os.environ:
         # If this var exists, we're inside a single batch task.
         task_index = int(os.environ['BATCH_TASK_INDEX'])
+        gcs_bucket = os.environ['GCS_BUCKET']
         gcs_prefix = os.environ['GCS_PREFIX']
         job_name = os.environ['JOB_ID']
-        GcpBatch.run_task(task_index, job_name, gcs_prefix)
+        GcpBatch.run_task(task_index, job_name, gcs_bucket, gcs_prefix)
     else:
         parser = argparse.ArgumentParser()
         parser.add_argument('project_filename')
