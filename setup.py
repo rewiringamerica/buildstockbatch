@@ -44,9 +44,11 @@ setuptools.setup(
         'ruamel.yaml',
         'awsretry',
         'lxml',
-        'google-cloud-batch',
-        'google-cloud-storage',
         'gcsfs',
+        'google-cloud-artifact-registry',
+        'google-cloud-batch',
+        'google-cloud-compute',
+        'google-cloud-storage',
     ],
     extras_require={
         'dev': [
