@@ -513,7 +513,7 @@ class GcpBatch(DockerBatchBase):
 
         runnable.container.commands = ['-c', 'python3 -m buildstockbatch.gcp.gcp']
 
-        job_env_cfg = self.cfg['gcp'].get('job_environment', {})
+        job_env_cfg = gcp_cfg.get('job_environment', {})
         resources = batch_v1.ComputeResource(
             cpu_milli=1000 * job_env_cfg.get('vcpus', 1),
             memory_mib=job_env_cfg.get('memory_mib', 1024),
