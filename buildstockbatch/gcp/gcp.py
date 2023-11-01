@@ -537,8 +537,7 @@ class GcpBatch(DockerBatchBase):
 
         # Specify type of VMs to run on
         policy = batch_v1.AllocationPolicy.InstancePolicy(
-            # If machine type isn't specified, GCP Batch with choose a type
-            # based on the resources requested.
+            # If machine type isn't specified, GCP Batch will choose a type based on the resources requested.
             machine_type=job_env_cfg.get('machine_type'),
             provisioning_model=(
                 batch_v1.AllocationPolicy.ProvisioningModel.SPOT
