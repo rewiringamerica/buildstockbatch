@@ -16,10 +16,8 @@ import boto3
 from botocore.exceptions import ClientError
 import collections
 import csv
-import docker
 from fsspec.implementations.local import LocalFileSystem
 import gzip
-import hashlib
 import itertools
 from joblib import Parallel, delayed
 import json
@@ -38,10 +36,16 @@ import time
 import io
 import zipfile
 
-from buildstockbatch.base import ValidationError, BuildStockBatchBase
+from buildstockbatch.base import ValidationError, DockerBatchBase
 from buildstockbatch.aws.awsbase import AwsJobBase
 from buildstockbatch import postprocessing
-from buildstockbatch.utils import ContainerRuntime, log_error_details, get_project_configuration, read_csv
+from buildstockbatch.utils import (
+    calc_hash_for_file,
+    compress_file,
+    get_project_configuration,
+    log_error_details,
+    read_csv,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,17 +77,6 @@ def upload_directory_to_s3(local_directory, bucket, prefix):
         for local_file, s3_key
         in filename_generator()
     )
-
-
-def compress_file(in_filename, out_filename):
-    with gzip.open(str(out_filename), 'wb') as f_out:
-        with open(str(in_filename), 'rb') as f_in:
-            shutil.copyfileobj(f_in, f_out)
-
-
-def calc_hash_for_file(filename):
-    with open(filename, 'rb') as f:
-        return hashlib.sha256(f.read()).hexdigest()
 
 
 def copy_s3_file(src_bucket, src_key, dest_bucket, dest_key):
@@ -1655,29 +1648,6 @@ class AwsSNS(AwsJobBase):
         )
 
         logger.info(f"Simple notifications topic {self.sns_state_machine_topic} deleted.")
-
-
-class DockerBatchBase(BuildStockBatchBase):
-
-    CONTAINER_RUNTIME = ContainerRuntime.DOCKER
-
-    def __init__(self, project_filename):
-        super().__init__(project_filename)
-
-        self.docker_client = docker.DockerClient.from_env()
-        try:
-            self.docker_client.ping()
-        except:  # noqa: E722 (allow bare except in this case because error can be a weird non-class Windows API error)
-            logger.error('The docker server did not respond, make sure Docker Desktop is started then retry.')
-            raise RuntimeError('The docker server did not respond, make sure Docker Desktop is started then retry.')
-
-    @staticmethod
-    def validate_project(project_file):
-        super(DockerBatchBase, DockerBatchBase).validate_project(project_file)
-
-    @property
-    def docker_image(self):
-        return 'nrel/openstudio:{}'.format(self.os_version)
 
 
 class AwsBatch(DockerBatchBase):

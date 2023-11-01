@@ -12,6 +12,7 @@ This is the base class mixed into the deployment specific classes (i.e. eagle, l
 
 from dask.distributed import Client
 import difflib
+import docker
 from fsspec.implementations.local import LocalFileSystem
 import logging
 from lxml import objectify
@@ -35,7 +36,7 @@ from buildstockbatch import (
     postprocessing
 )
 from buildstockbatch.exc import SimulationExists, ValidationError
-from buildstockbatch.utils import path_rel_to_file, get_project_configuration, read_csv
+from buildstockbatch.utils import ContainerRuntime, path_rel_to_file, get_project_configuration, read_csv
 from buildstockbatch.__version__ import __version__ as bsb_version
 
 logger = logging.getLogger(__name__)
@@ -883,3 +884,26 @@ class BuildStockBatchBase(object):
 
         keep_individual_timeseries = self.cfg.get('postprocessing', {}).get('keep_individual_timeseries', False)
         postprocessing.remove_intermediate_files(fs, self.results_dir, keep_individual_timeseries)
+
+
+class DockerBatchBase(BuildStockBatchBase):
+    """Base class for implementations that run in Docker containers."""
+    CONTAINER_RUNTIME = ContainerRuntime.DOCKER
+
+    def __init__(self, project_filename):
+        super().__init__(project_filename)
+
+        self.docker_client = docker.DockerClient.from_env()
+        try:
+            self.docker_client.ping()
+        except:  # noqa: E722 (allow bare except in this case because error can be a weird non-class Windows API error)
+            logger.error('The docker server did not respond, make sure Docker Desktop is started then retry.')
+            raise RuntimeError('The docker server did not respond, make sure Docker Desktop is started then retry.')
+
+    @staticmethod
+    def validate_project(project_file):
+        super(DockerBatchBase, DockerBatchBase).validate_project(project_file)
+
+    @property
+    def docker_image(self):
+        return f"nrel/openstudio:{self.os_version}"
