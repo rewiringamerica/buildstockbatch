@@ -140,7 +140,7 @@ file, something like this:
         bucket: mybucket
         prefix: national01_run01
       use_spot: true
-      batch_array_size: 10000
+      batch_array_size: 100
       notifications_email: your_email@somewhere.com
 
 See :ref:`gcp-config` for details.

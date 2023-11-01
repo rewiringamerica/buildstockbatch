@@ -252,6 +252,12 @@ on the `GCP Batch <https://cloud.google.com/batch>`_ service.
     * ``repository``: The name of the GCP Artifact Repository in which Docker images are stored.
       This will be combined with the ``project`` and ``region`` to build the full URL to the
       repository.
+*  ``job_environment``: Specifies the computing requirements for each simulation.
+
+    * ``vcpus``: Number of CPUs needed. default: 1.
+    * ``memory_mib``: Amount of RAM memory needed for each simulation in MiB. default 1024. For large multifamily buildings
+      this works better if set to 2048.
+    * ``machine_type``: GCP Compute Engine machine type to use. If omitted, GCP batch will choose a machine type based on the requested vCPUs and memory.
 
 .. _postprocessing:
 
