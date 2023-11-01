@@ -145,7 +145,6 @@ class GcpBatch(DockerBatchBase):
         self.gcs_bucket = self.cfg['gcp']['gcs']['bucket']
         self.gcs_prefix = self.cfg['gcp']['gcs']['prefix']
         self.batch_array_size = self.cfg['gcp']['batch_array_size']
-        self.use_spot = self.cfg['gcp'].get('use_spot', False)
 
         # Add timestamp to job ID, since duplicates aren't allowed (even between finished and new jobs)
         # TODO: stop appending timestamp here - it's useful for testing, but we should probably
