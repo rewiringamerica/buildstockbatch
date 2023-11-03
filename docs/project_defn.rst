@@ -254,7 +254,7 @@ on the `GCP Batch <https://cloud.google.com/batch>`_ service.
     * ``vcpus``: Number of CPUs to allocate for running each simulation. Default: 1.
     * ``memory_mib``: Amount of RAM memory needed for each simulation in MiB. Default: 1024.
       For large multifamily buildings this works better if set to 2048.
-    * ``machine_type``: GCP Compute Engine machine type to use. If omitted, GCP batch will
+    * ``machine_type``: GCP Compute Engine machine type to use. If omitted, GCP Batch will
       choose a machine type based on the requested vCPUs and memory. If set, the machine type
       should have at least as many resources as requested for each simulation above. If it is
       large enough, multiple simulations will be run in parallel on the same machine.
