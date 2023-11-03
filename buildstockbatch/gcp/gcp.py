@@ -355,13 +355,12 @@ class GcpBatch(DockerBatchBase):
         logger.info(f'Showing the first 10 existing jobs that match: {request.filter}\n')
         response = client.list_jobs(request)
         for job in response.jobs:
-            task_counts = collections.defaultdict(int)
             logger.debug(job)
             logger.info(f'Name: {job.name}')
             logger.info(f'  UID: {job.uid}')
             logger.info(f'  Status: {job.status.state.name}')
-            task_groups = job.status.task_groups
-            for group in task_groups.values():
+            task_counts = collections.defaultdict(int)
+            for group in job.status.task_groups.values():
                 for status, count in group.counts.items():
                     task_counts[status] += count
             logger.info(f'  Task statuses: {dict(task_counts)}')
