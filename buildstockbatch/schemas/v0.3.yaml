@@ -38,6 +38,7 @@ gcs-spec:
 
 gcp-ar-spec:
   repository: str(required=True)
+  region: str(required=False)
 
 aws-spec:
   job_identifier: regex('^[a-zA-Z]\w{,9}$', required=True)

@@ -242,16 +242,19 @@ on the `GCP Batch <https://cloud.google.com/batch>`_ service.
        processed data storage.
     *  ``prefix``: The Cloud Storage prefix at which the data will be stored.
 
-*  ``region``: The GCP region in which the batch will be run and of the Artifact Registry.
+*  ``region``: The GCP region in which the batch will be run. This will also be used for the region
+   of the Artifact Registry if ``artifact_registry/region`` is not provided.
 *  ``use_spot``: true or false. Defaults to false if missing. This tells the project
    to use `Spot VMs <https://cloud.google.com/spot-vms>`_ for data
    simulations, which can reduce costs by up to 91%.
 *  ``batch_array_size``: Number of concurrent simulations to run. Max: 10000.
 *  ``artifact_registry``: Configuration for Docker image storage in GCP Artifact Registry
 
-    * ``repository``: The name of the GCP Artifact Repository in which Docker images are stored.
-      This will be combined with the ``project`` and ``region`` to build the full URL to the
-      repository.
+    *  ``region``: The region of the Artifact Registry. If this is not specified, it will use the
+       top-level ``region`` option (that defines where the batch will be run).
+    *  ``repository``: The name of the GCP Artifact Repository in which Docker images are stored.
+       This will be combined with the ``project`` and ``region`` to build the full URL to the
+       repository.
 
 .. _postprocessing:
 

@@ -142,6 +142,7 @@ class GcpBatch(DockerBatchBase):
         self.gcp_project = self.cfg['gcp']['project']
         self.region = self.cfg['gcp']['region']
         self.ar_repo = self.cfg['gcp']['artifact_registry']['repository']
+        self.ar_region = self.cfg['gcp']['artifact_registry'].get('region', self.region)
         self.gcs_bucket = self.cfg['gcp']['gcs']['bucket']
         self.gcs_prefix = self.cfg['gcp']['gcs']['prefix']
         self.batch_array_size = self.cfg['gcp']['batch_array_size']
@@ -176,13 +177,14 @@ class GcpBatch(DockerBatchBase):
 
         # Check that artifact registry repository exists
         repo = cfg['gcp']['artifact_registry']['repository']
+        ar_region = cfg['gcp']['artifact_registry'].get('region', region)
         ar_client = artifactregistry_v1.ArtifactRegistryClient()
-        repo_name = f'projects/{gcp_project}/locations/{region}/repositories/{repo}'
+        repo_name = f'projects/{gcp_project}/locations/{ar_region}/repositories/{repo}'
         try:
             ar_client.get_repository(name=repo_name)
         except exceptions.NotFound:
             raise ValidationError(
-                f'Artifact Registry repository {repo} does not exist in project {gcp_project} and region {region}'
+                f'Artifact Registry repository {repo} does not exist in project {gcp_project} and region {ar_region}'
             )
 
     @staticmethod
@@ -227,7 +229,7 @@ class GcpBatch(DockerBatchBase):
             "buildstockbatch"; for example,
              `us-central1-docker.pkg.dev/buildstockbatch/buildstockbatch-docker/buildstockbatch`
         """
-        return f"{self.region}-docker.pkg.dev/{self.gcp_project}/{self.ar_repo}/buildstockbatch"
+        return f"{self.ar_region}-docker.pkg.dev/{self.gcp_project}/{self.ar_repo}/buildstockbatch"
 
     # todo: aws-shared (see file comment)
     def build_image(self):
