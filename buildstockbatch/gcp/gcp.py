@@ -540,7 +540,7 @@ class GcpBatch(DockerBatchBase):
             machine_type=job_env_cfg.get('machine_type'),
             provisioning_model=(
                 batch_v1.AllocationPolicy.ProvisioningModel.SPOT
-                if gcp_cfg.get('use_spot')
+                if job_env_cfg.get('use_spot')
                 else batch_v1.AllocationPolicy.ProvisioningModel.STANDARD
             ),
         )
