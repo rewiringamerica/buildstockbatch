@@ -555,7 +555,7 @@ def combine_results(fs, results_dir, cfg, do_timeseries=True):
             if isinstance(fs, LocalFileSystem):
                 ts_out_loc = f"{ts_dir}/upgrade={upgrade_id}/"
             elif isinstance(fs, GCSFileSystem):
-                ts_out_loc = f"gs://{ts_dir}/upgrade={upgrade_id}/"
+                ts_out_loc = f"{ts_dir}/upgrade={upgrade_id}"
             else:
                 assert isinstance(fs, S3FileSystem)
                 ts_out_loc = f"s3://{ts_dir}/upgrade={upgrade_id}/"
