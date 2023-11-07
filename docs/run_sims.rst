@@ -144,6 +144,10 @@ file, something like this:
 
 See :ref:`gcp-config` for details.
 
+You can optionally override the ``job_identifier`` from the command line (``buildstock_gcp project.yml national02``).
+Note that each job you run must have a unique ID (unless you delete a previous run with the ``--clean`` option), so
+this option makes it easier to give each job a new ID.
+
 
 List existing jobs
 ..................
@@ -159,6 +163,6 @@ Cleaning up after yourself
 TODO: Review and update this after implementing cleanup option.
 
 When the simulation and postprocessing is all complete, run ``buildstock_gcp
---clean your_project_file.yml``. This will clean up all the GCP resources that
+--clean your_project_file.yml [job_identifier]``. This will clean up all the GCP resources that
 were created to run the specified project. If the project is still running, it
 will be cancelled. Your output files will still be available in GCS.
