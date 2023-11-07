@@ -381,6 +381,8 @@ class GcpBatch(DockerBatchBase):
     def clean(self):
         delete_job(self.gcp_batch_job_name)
         self.clean_postprocessing_job()
+        # TODO: Delete Docker image
+        # TODO: Prune local docker images
 
     def show_jobs(self):
         """
