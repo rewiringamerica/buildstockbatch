@@ -19,7 +19,6 @@ import argparse
 import collections
 import csv
 
-# from datetime import datetime
 import docker
 from fsspec.implementations.local import LocalFileSystem
 from gcsfs import GCSFileSystem
@@ -153,7 +152,7 @@ def delete_job(job_name):
         name=job_name,
     )
     operation = client.delete_job(request=request)
-    logger.info("Cancelling and deleting GCP Batch job. This may take a few minutes.")
+    logger.info("Canceling and deleting GCP Batch job. This may take a few minutes.")
     operation.result()
 
 
@@ -190,9 +189,6 @@ class GcpBatch(DockerBatchBase):
         self.gcs_bucket = self.cfg["gcp"]["gcs"]["bucket"]
         self.gcs_prefix = self.cfg["gcp"]["gcs"]["prefix"]
         self.batch_array_size = self.cfg["gcp"]["batch_array_size"]
-
-        # Add timestamp to job ID, since duplicates aren't allowed (even between finished and new jobs)
-        self.unique_job_id = self.job_identifier  # + datetime.utcnow().strftime("%y-%m-%d-%H%M%S")
 
     @staticmethod
     def validate_gcp_args(project_file):
@@ -622,7 +618,7 @@ class GcpBatch(DockerBatchBase):
 
         create_request = batch_v1.CreateJobRequest()
         create_request.job = job
-        create_request.job_id = self.unique_job_id
+        create_request.job_id = self.job_identifier
         create_request.parent = f"projects/{self.gcp_project}/locations/{self.region}"
 
         # Start the job!
@@ -634,7 +630,7 @@ class GcpBatch(DockerBatchBase):
         logger.info(f"  Job UID: {created_job.uid}")
         job_url = (
             "https://console.cloud.google.com/batch/jobsDetail/regions/"
-            f"{self.region}/jobs/{self.unique_job_id}/details?project={self.gcp_project}"
+            f"{self.region}/jobs/{self.job_identifier}/details?project={self.gcp_project}"
         )
         logger.info(f"View GCP Batch job at {job_url}")
 
@@ -926,7 +922,6 @@ def main():
     else:
         parser = argparse.ArgumentParser()
         parser.add_argument("project_filename")
-        # Optional override to the job identifier in the config file.
         parser.add_argument(
             "job_identifier",
             default=None,
@@ -937,8 +932,8 @@ def main():
             "-c",
             "--clean",
             action="store_true",
-            help="After the simulation is done, run with --clean to clean up GCP environment"
-            # TODO: Clarify whether this will also stop a job that's still running.
+            help="After the simulation is done, run with --clean to clean up GCP environment. "
+            "If the GCP Batch job is still running, this will cancel the job."
         )
         group.add_argument(
             "--validateonly",
