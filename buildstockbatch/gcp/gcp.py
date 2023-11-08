@@ -19,6 +19,7 @@ import argparse
 import collections
 import csv
 from datetime import datetime
+from dask.distributed import Client as DaskClient
 import docker
 from fsspec.implementations.local import LocalFileSystem
 from gcsfs import GCSFileSystem
@@ -793,7 +794,7 @@ class GcpBatch(DockerBatchBase):
         """
         return GCSFileSystem()
 
-    def process_results(self, skip_combine=False, use_dask_cluster=True):
+    def process_results(self, postprocess_cloud=False, skip_combine=False, use_dask_cluster=True):
         """
         Overrides `BuildStockBatchBase.process_results()`.
 
@@ -820,14 +821,125 @@ class GcpBatch(DockerBatchBase):
             else:
                 do_timeseries = "timeseries_csv_export" in wfg_args.keys()
 
-            fs = self.get_fs()
-
             if not skip_combine:
-                postprocessing.combine_results(fs, self.results_dir, self.cfg, do_timeseries=do_timeseries)
+                if postprocess_cloud:
+                    self.setup_combine_results_on_cloud(self.results_dir, do_timeseries=do_timeseries)
+                else:
+                    postprocessing.combine_results(self.get_fs(), self.results_dir, self.cfg, do_timeseries=do_timeseries)
 
         finally:
             if use_dask_cluster:
                 self.cleanup_dask()
+
+
+    @classmethod
+    def run_combine_results_on_cloud(cls, gcs_bucket, gcs_prefix, results_dir, do_timeseries):
+        """This is the function that is run on the cloud to actually perform `combine_results` on
+        the cloud.
+        """
+        logger.info("run_combine_results_on_cloud starting")
+        client = storage.Client()
+        bucket = client.get_bucket(gcs_bucket)
+
+        logger.debug("Reading config")
+        blob = bucket.blob(f"{gcs_prefix}/config.json")
+        cfg = json.loads(blob.download_as_string())
+
+        DaskClient()
+        postprocessing.combine_results(GCSFileSystem(), results_dir, cfg, do_timeseries=do_timeseries)
+
+
+    def setup_combine_results_on_cloud(self, results_dir, do_timeseries=True):
+        """Set up `combine_results` to be run on a cloud VM.
+
+        Parameters are passed to `combine_results` (so see that for parameter documentation).
+        """
+        logger.info("Running combine_results on cloud.")
+
+        client = batch_v1.BatchServiceClient()
+
+        runnable = batch_v1.Runnable()
+        runnable.container = batch_v1.Runnable.Container()
+        runnable.container.image_uri = self.repository_uri + ":" + self.job_identifier
+        runnable.container.entrypoint = "/bin/sh"
+
+        # Pass environment variables to each task
+        environment = batch_v1.Environment()
+        environment.variables = {
+            "JOB_TYPE": "POSTPROCESS",
+            "GCS_PREFIX": self.gcs_prefix,
+            "GCS_BUCKET": self.gcs_bucket,
+            "RESULTS_DIR": results_dir,
+            "DO_TIMESERIES": "True" if do_timeseries else "False",
+        }
+        runnable.environment = environment
+
+        runnable.container.commands = ["-c", "python3 -m buildstockbatch.gcp.gcp"]
+        pp_env_cfg = self.cfg["gcp"].get("postprocessing_environment", {})
+        resources = batch_v1.ComputeResource(
+            # TODO: Not sure how this affects the combine_results job
+            cpu_milli=1000 * pp_env_cfg.get("vcpus", 1),
+            # Test runs often failed with just 1024 MiB
+            memory_mib=pp_env_cfg.get("memory_mib", 2048),
+        )
+
+        task = batch_v1.TaskSpec(
+            runnables=[runnable],
+            compute_resource=resources,
+            # TODO: Confirm what happens if this fails repeatedly, or for only some tasks, and document it.
+            max_retry_count=0,
+            # TODO: How long does this timeout need to be?
+            max_run_duration=f"{24 * 60 * 60}s",
+        )
+
+        # How many of these tasks to run.
+        group = batch_v1.TaskGroup(
+            task_count=1,
+            task_spec=task,
+        )
+
+        # Specify type of VMs to run on
+        policy = batch_v1.AllocationPolicy.InstancePolicy(
+            # If machine type isn't specified, GCP Batch will choose a type based on the resources requested.
+            machine_type=pp_env_cfg.get("machine_type"),
+            provisioning_model=(
+                batch_v1.AllocationPolicy.ProvisioningModel.SPOT
+                if pp_env_cfg.get("use_spot")
+                else batch_v1.AllocationPolicy.ProvisioningModel.STANDARD
+            ),
+        )
+        instances = batch_v1.AllocationPolicy.InstancePolicyOrTemplate(policy=policy)
+        allocation_policy = batch_v1.AllocationPolicy(instances=[instances])
+        # TODO: Add option to set service account that runs the job?
+        # Otherwise uses the project's default compute engine service account.
+        # allocation_policy.service_account = batch_v1.ServiceAccount(email = '')
+
+        # Define the batch job
+        job = batch_v1.Job()
+        job.task_groups = [group]
+        job.allocation_policy = allocation_policy
+        job.logs_policy = batch_v1.LogsPolicy()
+        job.logs_policy.destination = batch_v1.LogsPolicy.Destination.CLOUD_LOGGING
+
+        postprocessing_job_id = f"{self.unique_job_id}-pp"
+        create_request = batch_v1.CreateJobRequest()
+        create_request.job = job
+        create_request.job_id = postprocessing_job_id
+        create_request.parent = f"projects/{self.gcp_project}/locations/{self.region}"
+
+        # Start the job!
+        created_job = client.create_job(create_request)
+        job_name = created_job.name
+
+        logger.info("Newly created postprocessing job using GCP Batch")
+        logger.info(f"  Job name: {job_name}")
+        logger.info(f"  Job UID: {created_job.uid}")
+        job_url = (
+            "https://console.cloud.google.com/batch/jobsDetail/regions/"
+            f"{self.region}/jobs/{postprocessing_job_id}/details?project={self.gcp_project}"
+        )
+        logger.info(f"View GCP Batch job at {job_url}")
+
 
     def upload_results(self, *args, **kwargs):
         """
@@ -868,7 +980,17 @@ def main():
         }
     )
     print(GcpBatch.LOGO)
-    if "BATCH_TASK_INDEX" in os.environ:
+    if "POSTPROCESS" == os.environ.get("JOB_TYPE", ""):
+        # POSTPROCESS on the cloud currently also uses batch (but just a single task), so the
+        # 'BATCH_TASK_INDEX' env var is also set for this. So, we need to check whether this
+        # should be a postprocess job before the simulation batch check (which just checks
+        # for 'BATCH_TASK_INDEX'). Instead, we should extend "JOB_TYPE" to that, too.
+        gcs_bucket = os.environ["GCS_BUCKET"]
+        gcs_prefix = os.environ["GCS_PREFIX"]
+        results_dir = os.environ["RESULTS_DIR"]
+        do_timeseries = os.environ.get("DO_TIMESERIES", "False") == "True"
+        GcpBatch.run_combine_results_on_cloud(gcs_bucket, gcs_prefix, results_dir, do_timeseries)
+    elif "BATCH_TASK_INDEX" in os.environ:
         # If this var exists, we're inside a single batch task.
         task_index = int(os.environ["BATCH_TASK_INDEX"])
         gcs_bucket = os.environ["GCS_BUCKET"]
@@ -903,6 +1025,11 @@ def main():
             help="Only do postprocessing, useful for when the simulations are already done",
             action="store_true",
         )
+        parser.add_argument(
+            "--postprocesscloud",
+            help="If postprocessing is to be done, do it on the cloud",
+            action="store_true",
+        )
         group.add_argument(
             "--crawl",
             help="Only do the crawling in Athena. When simulations and postprocessing are done.",
@@ -930,15 +1057,17 @@ def main():
         elif args.postprocessonly:
             batch.build_image()
             batch.push_image()
-            batch.process_results()
+            batch.process_results(args.postprocesscloud)
         elif args.crawl:
             batch.process_results(skip_combine=True, use_dask_cluster=False)
         else:
             batch.build_image()
             batch.push_image()
             batch.run_batch()
-            batch.process_results()
-            batch.clean()
+            batch.process_results(args.postprocesscloud)
+            if not args.postprocesscloud:
+                # postprocesscloud is async, so don't want to clean before it's done
+                batch.clean()
 
 
 if __name__ == "__main__":

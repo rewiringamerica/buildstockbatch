@@ -29,6 +29,7 @@ gcp-spec:
   batch_array_size: num(min=1, max=10000, required=True)
   gcs: include('gcs-spec', required=True)
   job_environment: include('gcp-job-environment-spec', required=False)
+  postprocessing_environment: include('gcp-job-environment-spec', required=False)
 
 gcs-spec:
   bucket: str(required=True)
