@@ -18,7 +18,6 @@ that's likely to be refactored out will be commented with 'todo: aws-shared'.
 import argparse
 import collections
 import csv
-
 import docker
 from fsspec.implementations.local import LocalFileSystem
 from gcsfs import GCSFileSystem
@@ -126,7 +125,7 @@ def copy_GCS_file(src_bucket, src_name, dest_bucket, dest_name):
 def delete_job(job_name):
     """Delete an existing GCP Batch job, with user confirmation.
 
-    :param job_name: GCP Batch job name, e.g. projects/PROJECT/locations/REGION/jobs/NAME
+    :param job_name: Full GCP Batch job name (projects/PROJECT/locations/REGION/jobs/NAME)
     """
     client = batch_v1.BatchServiceClient()
     try:
@@ -169,7 +168,7 @@ class GcpBatch(DockerBatchBase):
     def __init__(self, project_filename, job_identifier=None):
         """
         :param project_filename: Path to the project's configuration file.
-        :param job_identifier: Optional override of gcp.job_identifier from the project file.
+        :param job_identifier: Optional job ID that will override gcp.job_identifier from the project file.
         """
         super().__init__(project_filename)
 
@@ -179,7 +178,7 @@ class GcpBatch(DockerBatchBase):
             self.job_identifier = self.cfg["gcp"]["job_identifier"]
 
         if len(self.job_identifier) > 48:
-            logger.warning("Job job_identifier is too long. Truncating to 48 characters.")
+            logger.warning("job_identifier is too long. Truncating to 48 characters.")
         self.job_identifier = re.sub("[^0-9a-zA-Z-]+", "-", self.job_identifier)[:48]
 
         self.project_filename = project_filename
@@ -386,7 +385,7 @@ class GcpBatch(DockerBatchBase):
 
     def clean(self):
         delete_job(self.gcp_batch_job_name())
-        # TODO: Clean up docker images (in AR and locally?)
+        # TODO: Clean up docker images in AR (and locally?)
 
         logger.warning("TODO: clean() not fully implemented yet!")
 
@@ -983,6 +982,8 @@ def main():
         elif args.crawl:
             batch.process_results(skip_combine=True, use_dask_cluster=False)
         else:
+            # TODO: check whether this job ID already exists. If so, don't try to start a new job, and maybe reattach
+            # to the existing one if it's still running.
             batch.build_image()
             batch.push_image()
             batch.run_batch()
