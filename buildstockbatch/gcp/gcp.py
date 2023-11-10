@@ -47,6 +47,7 @@ from google.cloud import artifactregistry_v1
 from google.cloud import batch_v1, storage
 from google.cloud.storage import transfer_manager
 from google.cloud import compute_v1
+from google.cloud import run_v2
 
 from buildstockbatch import postprocessing
 from buildstockbatch.base import BuildStockBatchBase
@@ -850,95 +851,63 @@ class GcpBatch(DockerBatchBase):
 
 
     def setup_combine_results_on_cloud(self, results_dir, do_timeseries=True):
-        """Set up `combine_results` to be run on a cloud VM.
+        """Set up `combine_results` to be run on GCP Cloud Run.
 
         Parameters are passed to `combine_results` (so see that for parameter documentation).
         """
-        logger.info("Running combine_results on cloud.")
+        logger.info("Creating job to run combine_results on Cloud Run...")
 
-        client = batch_v1.BatchServiceClient()
-
-        runnable = batch_v1.Runnable()
-        runnable.container = batch_v1.Runnable.Container()
-        runnable.container.image_uri = self.repository_uri + ":" + self.job_identifier
-        runnable.container.entrypoint = "/bin/sh"
-
-        # Pass environment variables to each task
-        environment = batch_v1.Environment()
-        environment.variables = {
-            "JOB_TYPE": "POSTPROCESS",
-            "GCS_PREFIX": self.gcs_prefix,
-            "GCS_BUCKET": self.gcs_bucket,
-            "RESULTS_DIR": results_dir,
-            "DO_TIMESERIES": "True" if do_timeseries else "False",
-        }
-        runnable.environment = environment
-
-        runnable.container.commands = ["-c", "python3 -m buildstockbatch.gcp.gcp"]
+        # Define the Job
         pp_env_cfg = self.cfg["gcp"].get("postprocessing_environment", {})
-        resources = batch_v1.ComputeResource(
-            # TODO: Not sure how this affects the combine_results job
-            cpu_milli=1000 * pp_env_cfg.get("vcpus", 1),
-            # Test runs often failed with just 1024 MiB
-            memory_mib=pp_env_cfg.get("memory_mib", 2048),
+        job = run_v2.Job(
+            template=run_v2.ExecutionTemplate(
+                template=run_v2.TaskTemplate(
+                    containers=[
+                        run_v2.Container(
+                            name=self.job_identifier,
+                            image=self.repository_uri + ":" + self.job_identifier,
+                            resources=run_v2.ResourceRequirements(
+                                limits={
+                                    "memory": f"{pp_env_cfg.get('memory_mib', 4096)}Mi",
+                                    "cpu": str(pp_env_cfg.get('cpus', 2)),
+                                }
+                            ),
+                            command=["/bin/sh"],
+                            args=["-c", "python3 -m buildstockbatch.gcp.gcp"],
+                            env=[
+                                run_v2.EnvVar(name="JOB_TYPE", value="POSTPROCESS"),
+                                run_v2.EnvVar(name="GCS_PREFIX", value=self.gcs_prefix),
+                                run_v2.EnvVar(name="GCS_BUCKET", value=self.gcs_bucket),
+                                run_v2.EnvVar(name="RESULTS_DIR", value=results_dir),
+                                run_v2.EnvVar(name="DO_TIMESERIES", value="True" if do_timeseries else "False")
+                            ],
+                        )
+                    ],
+                    timeout=f"{60 * 60 * 24}s", # 24h
+                    max_retries=0,
+                )
+            )
         )
 
-        task = batch_v1.TaskSpec(
-            runnables=[runnable],
-            compute_resource=resources,
-            # TODO: Confirm what happens if this fails repeatedly, or for only some tasks, and document it.
-            max_retry_count=0,
-            # TODO: How long does this timeout need to be?
-            max_run_duration=f"{24 * 60 * 60}s",
-        )
-
-        # How many of these tasks to run.
-        group = batch_v1.TaskGroup(
-            task_count=1,
-            task_spec=task,
-        )
-
-        # Specify type of VMs to run on
-        policy = batch_v1.AllocationPolicy.InstancePolicy(
-            # If machine type isn't specified, GCP Batch will choose a type based on the resources requested.
-            machine_type=pp_env_cfg.get("machine_type"),
-            provisioning_model=(
-                batch_v1.AllocationPolicy.ProvisioningModel.SPOT
-                if pp_env_cfg.get("use_spot")
-                else batch_v1.AllocationPolicy.ProvisioningModel.STANDARD
-            ),
-        )
-        instances = batch_v1.AllocationPolicy.InstancePolicyOrTemplate(policy=policy)
-        allocation_policy = batch_v1.AllocationPolicy(instances=[instances])
-        # TODO: Add option to set service account that runs the job?
-        # Otherwise uses the project's default compute engine service account.
-        # allocation_policy.service_account = batch_v1.ServiceAccount(email = '')
-
-        # Define the batch job
-        job = batch_v1.Job()
-        job.task_groups = [group]
-        job.allocation_policy = allocation_policy
-        job.logs_policy = batch_v1.LogsPolicy()
-        job.logs_policy.destination = batch_v1.LogsPolicy.Destination.CLOUD_LOGGING
-
+        # Create the job
         postprocessing_job_id = f"{self.unique_job_id}-pp"
-        create_request = batch_v1.CreateJobRequest()
-        create_request.job = job
-        create_request.job_id = postprocessing_job_id
-        create_request.parent = f"projects/{self.gcp_project}/locations/{self.region}"
+        jobs_client = run_v2.JobsClient()
+        jobs_client.create_job(
+            run_v2.CreateJobRequest(
+                parent=f"projects/{self.gcp_project}/locations/{self.region}",
+                job_id=postprocessing_job_id,
+                job=job
+            )
+        )
+        job_url = f"https://console.cloud.google.com/run/jobs/details/{self.region}" \
+                  f"/{postprocessing_job_id}/executions?project={self.gcp_project}"
+        logger.info(f"Cloud Run job created (but not yet started). See status at: {job_url}")
 
         # Start the job!
-        created_job = client.create_job(create_request)
-        job_name = created_job.name
-
-        logger.info("Newly created postprocessing job using GCP Batch")
-        logger.info(f"  Job name: {job_name}")
-        logger.info(f"  Job UID: {created_job.uid}")
-        job_url = (
-            "https://console.cloud.google.com/batch/jobsDetail/regions/"
-            f"{self.region}/jobs/{postprocessing_job_id}/details?project={self.gcp_project}"
-        )
-        logger.info(f"View GCP Batch job at {job_url}")
+        job_name=f"projects/{self.gcp_project}/locations/{self.region}" \
+                 f"/jobs/{postprocessing_job_id}"
+        jobs_client.run_job(name=job_name)
+        logger.info(f"Cloud Run job started!")
 
 
     def upload_results(self, *args, **kwargs):
@@ -980,23 +949,19 @@ def main():
         }
     )
     print(GcpBatch.LOGO)
-    if "POSTPROCESS" == os.environ.get("JOB_TYPE", ""):
-        # POSTPROCESS on the cloud currently also uses batch (but just a single task), so the
-        # 'BATCH_TASK_INDEX' env var is also set for this. So, we need to check whether this
-        # should be a postprocess job before the simulation batch check (which just checks
-        # for 'BATCH_TASK_INDEX'). Instead, we should extend "JOB_TYPE" to that, too.
-        gcs_bucket = os.environ["GCS_BUCKET"]
-        gcs_prefix = os.environ["GCS_PREFIX"]
-        results_dir = os.environ["RESULTS_DIR"]
-        do_timeseries = os.environ.get("DO_TIMESERIES", "False") == "True"
-        GcpBatch.run_combine_results_on_cloud(gcs_bucket, gcs_prefix, results_dir, do_timeseries)
-    elif "BATCH_TASK_INDEX" in os.environ:
+    if "BATCH_TASK_INDEX" in os.environ:
         # If this var exists, we're inside a single batch task.
         task_index = int(os.environ["BATCH_TASK_INDEX"])
         gcs_bucket = os.environ["GCS_BUCKET"]
         gcs_prefix = os.environ["GCS_PREFIX"]
         job_name = os.environ["JOB_NAME"]
         GcpBatch.run_task(task_index, job_name, gcs_bucket, gcs_prefix)
+    elif "POSTPROCESS" == os.environ.get("JOB_TYPE", ""):
+        gcs_bucket = os.environ["GCS_BUCKET"]
+        gcs_prefix = os.environ["GCS_PREFIX"]
+        results_dir = os.environ["RESULTS_DIR"]
+        do_timeseries = os.environ.get("DO_TIMESERIES", "False") == "True"
+        GcpBatch.run_combine_results_on_cloud(gcs_bucket, gcs_prefix, results_dir, do_timeseries)
     else:
         parser = argparse.ArgumentParser()
         parser.add_argument("project_filename")
