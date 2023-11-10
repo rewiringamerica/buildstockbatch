@@ -37,6 +37,7 @@ class DockerBatchBase(BuildStockBatchBase):
     """Base class for implementations that run in Docker containers."""
 
     CONTAINER_RUNTIME = ContainerRuntime.DOCKER
+    MAX_JOB_COUNT = 10000
 
     def __init__(self, project_filename):
         super().__init__(project_filename)
@@ -62,7 +63,7 @@ class DockerBatchBase(BuildStockBatchBase):
 
     def prep_batches(self, tmppath):
         """
-        Prepare batches of samples to be run in the cloud.
+        Prepare batches of samples to be uploaded and run in the cloud.
 
         This will:
             - Perform the sampling
@@ -73,16 +74,16 @@ class DockerBatchBase(BuildStockBatchBase):
 
         Also depends on self.weather_dir existing.
 
-        Returns (job_count, unique_epws), where
+        :returns: (job_count, unique_epws), where
             job_count: The number of jobs the samples were split into.
             unique_epws: A dictionary mapping from the hash of weather files to a list of filenames
-                with that hashed value.
+                with that hashed value. Only one copy of each unique file is written to tmppath, so
+                this can be used to recreate the other files later.
         """
         # Generate buildstock.csv
         buildstock_csv_filename = self.sampler.run_sampling()
 
         self._get_weather_files()
-        # tmppath = pathlib.Path(tmpdir)
         logger.debug("Creating assets tarfile")
         with tarfile.open(tmppath / "assets.tar.gz", "x:gz") as tar_f:
             project_path = pathlib.Path(self.project_dir)
@@ -187,12 +188,15 @@ class DockerBatchBase(BuildStockBatchBase):
 
         return (job_count, unique_epws)
 
+    @classmethod
     def get_epws_to_download(cls, sim_dir, jobs_d):
         """
-        Gets the list of filenames for the weather data required for this job.
+        Gets the list of filenames for the weather data required for a single batch of simulations.
 
         :param sim_dir: Path to the directory where job files are stored
         :param jobs_d: Contents of a single job JSON file; contains the list of buildings to simulate in this job.
+
+        :returns: Set of epw filenames needed for this batch of simulations.
         """
         # Make a lookup of which parameter points to the weather file from options_lookup.tsv
         with open(sim_dir / "lib" / "resources" / "options_lookup.tsv", "r", encoding="utf-8") as f:
@@ -205,7 +209,8 @@ class DockerBatchBase(BuildStockBatchBase):
                 if sum(row_has_epw):
                     if row[0] != param_name and param_name is not None:
                         raise RuntimeError(
-                            f"The epw files are specified in options_lookup.tsv under more than one parameter type: {param_name}, {row[0]}"  # noqa: E501
+                            "The epw files are specified in options_lookup.tsv under more than one parameter type: "
+                            f"{param_name}, {row[0]}"
                         )
                     epw_filename = row[row_has_epw.index(True) + 2].split("=")[1]
                     param_name = row[0]
@@ -227,17 +232,20 @@ class DockerBatchBase(BuildStockBatchBase):
 
         return epws_to_download
 
-    def run_simulations(cls, cfg, jobs_d, sim_dir, fs, bucket, prefix, job_id):
+    @classmethod
+    def run_simulations(cls, cfg, job_id, jobs_d, sim_dir, fs, bucket, prefix):
         """
         Run one batch of simulations.
 
+        Runs the simulations, writes outputs to the provided storage bucket, and cleans up intermediate files.
+
         :param cfg: Project config contents.
+        :param job_id: Index of this job.
         :param jobs_d: Contents of a single job JSON file; contains the list of buildings to simulate in this job.
         :param sim_dir: Path to the (local) directory where job files are stored.
         :param fs: Filesystem to use when writing outputs to storage bucket
         :param bucket: Name of the storage bucket to upload results to.
         :param prefix: File prefix to use when writing to storage bucket.
-        :param job_id: Index of this job.
         """
         local_fs = LocalFileSystem()
         reporting_measures = cls.get_reporting_measures(cfg)

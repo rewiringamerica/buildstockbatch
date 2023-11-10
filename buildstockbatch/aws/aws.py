@@ -1082,7 +1082,8 @@ class AwsBatchEnv(AwsJobBase):
                                 rt_counter = rt_counter - 1
                                 if "DependencyViolation" in str(e):
                                     logger.info(
-                                        "Waiting for association to be released before deleting route table.  Sleeping..."  # noqa E501
+                                        "Waiting for association to be released before deleting route table.  "
+                                        "Sleeping..."
                                     )
                                     time.sleep(5)
                                 else:
@@ -1464,8 +1465,6 @@ class AwsSNS(AwsJobBase):
 
 
 class AwsBatch(DockerBatchBase):
-    MAX_JOB_COUNT = 10000
-
     def __init__(self, project_filename):
         super().__init__(project_filename)
 
@@ -1587,9 +1586,9 @@ class AwsBatch(DockerBatchBase):
         # Compress and upload assets to S3
         with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir, tempfile.TemporaryDirectory(
             prefix="bsb_"
-        ) as tmp_weather_dir:  # noqa: E501
-            tmppath = pathlib.Path(tmpdir)
+        ) as tmp_weather_dir:
             self._weather_dir = tmp_weather_dir
+            tmppath = pathlib.Path(tmpdir)
 
             array_size, unique_epws = self.prep_batches(tmppath)
 
@@ -1620,7 +1619,8 @@ class AwsBatch(DockerBatchBase):
         fs = S3FileSystem()
         for upgrade_id in range(len(self.cfg.get("upgrades", [])) + 1):
             fs.makedirs(
-                f"{self.cfg['aws']['s3']['bucket']}/{self.cfg['aws']['s3']['prefix']}/results/simulation_output/timeseries/up{upgrade_id:02d}"  # noqa E501
+                f"{self.cfg['aws']['s3']['bucket']}/{self.cfg['aws']['s3']['prefix']}/results/simulation_output/"
+                f"timeseries/up{upgrade_id:02d}"
             )
 
         # Define the batch environment
@@ -1723,7 +1723,7 @@ class AwsBatch(DockerBatchBase):
                     logger.debug("Extracting {}".format(epw_filename))
                     f_out.write(gzip.decompress(f_gz.getvalue()))
 
-        cls.run_simulations(cfg, jobs_d, sim_dir, S3FileSystem(), bucket, prefix, job_id)
+        cls.run_simulations(cfg, jobs_d, job_id, sim_dir, S3FileSystem(), bucket, prefix)
 
 
 @log_error_details()
