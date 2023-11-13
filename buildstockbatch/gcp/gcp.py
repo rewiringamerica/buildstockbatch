@@ -236,6 +236,20 @@ class GcpBatch(DockerBatchBase):
         """
         return f"{self.region}-docker.pkg.dev/{self.gcp_project}/{self.ar_repo}/buildstockbatch"
 
+    @property
+    def postprocessing_job_id(self):
+        return f"{self.job_identifier}-pp"
+
+    @property
+    def postprocessing_job_name(self):
+        return f"projects/{self.gcp_project}/locations/{self.region}" \
+               f"/jobs/{self.postprocessing_job_id}"
+
+    @property
+    def postprocessing_job_console_url(self):
+        return f"https://console.cloud.google.com/run/jobs/details/{self.region}" \
+               f"/{self.postprocessing_job_id}/executions?project={self.gcp_project}"
+
     # todo: aws-shared (see file comment)
     def build_image(self):
         """
@@ -357,9 +371,8 @@ class GcpBatch(DockerBatchBase):
 
     def clean(self):
         delete_job(self.gcp_batch_job_name)
-        # TODO: Clean up docker images in AR (and locally?)
+        self.clean_postprocessing_job()
 
-        logger.warning("TODO: clean() not fully implemented yet!")
 
     def list_jobs(self):
         """
@@ -903,24 +916,61 @@ class GcpBatch(DockerBatchBase):
         )
 
         # Create the job
-        postprocessing_job_id = f"{self.unique_job_id}-pp"
         jobs_client = run_v2.JobsClient()
         jobs_client.create_job(
             run_v2.CreateJobRequest(
                 parent=f"projects/{self.gcp_project}/locations/{self.region}",
-                job_id=postprocessing_job_id,
+                job_id=self.postprocessing_job_id,
                 job=job
             )
         )
-        job_url = f"https://console.cloud.google.com/run/jobs/details/{self.region}" \
-                  f"/{postprocessing_job_id}/executions?project={self.gcp_project}"
-        logger.info(f"Cloud Run job created (but not yet started). See status at: {job_url}")
+        logger.info("Cloud Run job created (but not yet started). See status at:"
+                    f" {self.postprocessing_job_console_url}")
 
         # Start the job!
-        job_name=f"projects/{self.gcp_project}/locations/{self.region}" \
-                 f"/jobs/{postprocessing_job_id}"
-        jobs_client.run_job(name=job_name)
-        logger.info(f"Cloud Run job started!")
+        jobs_client.run_job(name=self.postprocessing_job_name)
+        logger.info("Post-processing Cloud Run job started! You will need to run this script with "
+                    "--clean to clean up GCP environment after post-processing is complete.")
+
+    def clean_postprocessing_job(self):
+        jobs_client = run_v2.JobsClient()
+        logger.info("Cleaning post-processing Cloud Run job with "
+                     f"job_identifier='{self.job_identifier}'; "
+                     f"job name={self.postprocessing_job_name}...")
+        try:
+            job = jobs_client.get_job(name=self.postprocessing_job_name)
+        except Exception:
+            logger.warning("Post-processing Cloud Run job not found for "
+                           f"job_identifier='{self.job_identifier}' "
+                           f"(postprocessing_job_name='{self.postprocessing_job_name}').")
+            return
+
+        # Ask for confirmation to delete if it is not completed
+        if int(job.latest_created_execution.completion_time.timestamp()) == 0:
+            answer = input(
+                "Post-processing job does not appear to be completed. "
+                "Are you sure you want to cancel and delete it? (y/n) "
+            )
+            if answer[:1] not in ("y", "Y"):
+                return
+
+            # Delete execution first
+            executions_client = run_v2.ExecutionsClient()
+            try:
+                executions_client.cancel_execution(name=job.latest_created_execution.name)
+            except Exception:
+                logger.warning("Failed to cancel execution with"
+                               f" name={job.latest_created_execution.name}.", exc_info=True)
+                logger.warning(f"You may want to try deleting the job via the console:"
+                               f" {self.postprocessing_job_console_url}")
+            return
+
+        # ... The job succeeded or its execution was deleted successfully; it can be deleted
+        try:
+            jobs_client.delete_job(name=self.postprocessing_job_name)
+        except Exception:
+            logger.warning("Failed to deleted post-processing Cloud Run job.", exc_info=True)
+        logger.info(f"Post-processing Cloud Run job deleted: '{self.postprocessing_job_name}'")
 
 
     def upload_results(self, *args, **kwargs):
