@@ -231,7 +231,7 @@ on the `GCP Batch <https://cloud.google.com/batch>`_ service.
     buildstock run locally, on Eagle, or on AWS cannot save to GCP.
 
 *  ``job_identifier``: A unique string that starts with an alphabetical character,
-   is up to 48 characters long, and only has letters, numbers or underscore.
+   is up to 48 characters long, and only has letters, numbers or hyphens.
    This is used to name the GCP Batch job to be created and
    differentiate it from other jobs.
 *  ``project``: The GCP Project ID in which the batch will be run and of the Artifact Registry

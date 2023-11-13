@@ -125,7 +125,7 @@ def copy_GCS_file(src_bucket, src_name, dest_bucket, dest_name):
 def delete_job(job_name):
     """Delete an existing GCP Batch job, with user confirmation.
 
-    :param job_name: Full GCP Batch job name (projects/PROJECT/locations/REGION/jobs/NAME)
+    :param job_name: Full GCP Batch job name (projects/{project}/locations/{region}/jobs/{name})
     """
     client = batch_v1.BatchServiceClient()
     try:
@@ -136,7 +136,7 @@ def delete_job(job_name):
     except Exception:
         logger.error(
             f"Job {job_name} invalid or not found. Job name should be in the format "
-            "projects/PROJECT/locations/REGION/jobs/NAME."
+            "projects/{project}/locations/{region}/jobs/{name}."
         )
         return
 
@@ -173,13 +173,13 @@ class GcpBatch(DockerBatchBase):
         super().__init__(project_filename)
 
         if job_identifier:
+            assert len(job_identifier) <= 48, "Job identifier must be no longer than 48 characters."
+            assert re.match(
+                "^[a-z]([a-z0-9-]{0,46}[a-z0-9])?$", job_identifier
+            ), "Job identifer must start with a letter and contain only letters, numbers, and hyphens."
             self.job_identifier = job_identifier
         else:
             self.job_identifier = self.cfg["gcp"]["job_identifier"]
-
-        if len(self.job_identifier) > 48:
-            logger.warning("job_identifier is too long. Truncating to 48 characters.")
-        self.job_identifier = re.sub("[^0-9a-zA-Z-]+", "-", self.job_identifier)[:48]
 
         self.project_filename = project_filename
         self.gcp_project = self.cfg["gcp"]["project"]
@@ -377,14 +377,16 @@ class GcpBatch(DockerBatchBase):
                     logger.debug(y["status"])
                     last_status = y["status"]
 
+    @property
     def gcp_batch_parent(self):
         return f"projects/{self.gcp_project}/locations/{self.region}"
 
+    @property
     def gcp_batch_job_name(self):
-        return f"{self.gcp_batch_parent()}/jobs/{self.job_identifier}"
+        return f"{self.gcp_batch_parent}/jobs/{self.job_identifier}"
 
     def clean(self):
-        delete_job(self.gcp_batch_job_name())
+        delete_job(self.gcp_batch_job_name)
         # TODO: Clean up docker images in AR (and locally?)
 
         logger.warning("TODO: clean() not fully implemented yet!")
@@ -932,7 +934,7 @@ def main():
             "--clean",
             action="store_true",
             help="After the simulation is done, run with --clean to clean up GCP environment. "
-            "If the GCP Batch job is still running, this will cancel the job."
+            "If the GCP Batch job is still running, this will cancel the job.",
         )
         group.add_argument(
             "--validateonly",
