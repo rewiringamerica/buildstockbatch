@@ -73,11 +73,6 @@ jobs:
         with:
           name: coverage-report-xml
           path: buildstockbatch/coverage/coverage.xml
-      - name: Coverage
-        uses: actions/upload-artifact@v2
-        with:
-          name: coverage
-          path: coverage/cobertura-coverage.xml
 
       - name: Build documentation
         if: ${{ matrix.python-version == '3.11' }}
