@@ -821,7 +821,7 @@ class GcpBatch(DockerBatchBase):
         """
         return GCSFileSystem()
 
-    def process_results(self, postprocess_cloud=False, skip_combine=False, use_dask_cluster=True):
+    def process_results(self, skip_combine=False, use_dask_cluster=True):
         """
         Overrides `BuildStockBatchBase.process_results()`.
 
@@ -834,29 +834,24 @@ class GcpBatch(DockerBatchBase):
         Here, where writing to GCS is (currently) coupled to running on GCS, the writing
         to GCS will happen indirectly (via `postprocessing.combine_results()`), and we don't need to
         also try to explicitly upload results.
+
+        TODO: `use_dask_cluster` (which comes from the parent implementation) is ignored. The job,
+        run on Cloud Run, always uses Dask, in part because `postprocessing.combine_results` fails
+        if `DaskClient()` is not initialized. Once `combine_results` is fixed to work without
+        DaskClient, the `use_dask_cluster` param needs to be piped through environment variables to
+        `run_combine_results_on_cloud`.
         """
 
-        if use_dask_cluster:
-            self.get_dask_client()  # noqa F841
+        wfg_args = self.cfg["workflow_generator"].get("args", {})
+        if self.cfg["workflow_generator"]["type"] == "residential_hpxml":
+            if "simulation_output_report" in wfg_args.keys():
+                if "timeseries_frequency" in wfg_args["simulation_output_report"].keys():
+                    do_timeseries = wfg_args["simulation_output_report"]["timeseries_frequency"] != "none"
+        else:
+            do_timeseries = "timeseries_csv_export" in wfg_args.keys()
 
-        try:
-            wfg_args = self.cfg["workflow_generator"].get("args", {})
-            if self.cfg["workflow_generator"]["type"] == "residential_hpxml":
-                if "simulation_output_report" in wfg_args.keys():
-                    if "timeseries_frequency" in wfg_args["simulation_output_report"].keys():
-                        do_timeseries = wfg_args["simulation_output_report"]["timeseries_frequency"] != "none"
-            else:
-                do_timeseries = "timeseries_csv_export" in wfg_args.keys()
-
-            if not skip_combine:
-                if postprocess_cloud:
-                    self.setup_combine_results_on_cloud(self.results_dir, do_timeseries=do_timeseries)
-                else:
-                    postprocessing.combine_results(self.get_fs(), self.results_dir, self.cfg, do_timeseries=do_timeseries)
-
-        finally:
-            if use_dask_cluster:
-                self.cleanup_dask()
+        if not skip_combine:
+            self.start_combine_results_job_on_cloud(self.results_dir, do_timeseries=do_timeseries)
 
 
     @classmethod
@@ -876,7 +871,7 @@ class GcpBatch(DockerBatchBase):
         postprocessing.combine_results(GCSFileSystem(), results_dir, cfg, do_timeseries=do_timeseries)
 
 
-    def setup_combine_results_on_cloud(self, results_dir, do_timeseries=True):
+    def start_combine_results_job_on_cloud(self, results_dir, do_timeseries=True):
         """Set up `combine_results` to be run on GCP Cloud Run.
 
         Parameters are passed to `combine_results` (so see that for parameter documentation).
@@ -1052,11 +1047,6 @@ def main():
             help="Only do postprocessing, useful for when the simulations are already done",
             action="store_true",
         )
-        parser.add_argument(
-            "--postprocesscloud",
-            help="If postprocessing is to be done, do it on the cloud",
-            action="store_true",
-        )
         group.add_argument(
             "--crawl",
             help="Only do the crawling in Athena. When simulations and postprocessing are done.",
@@ -1090,7 +1080,7 @@ def main():
         elif args.postprocessonly:
             batch.build_image()
             batch.push_image()
-            batch.process_results(args.postprocesscloud)
+            batch.process_results()
         elif args.crawl:
             batch.process_results(skip_combine=True, use_dask_cluster=False)
         else:
@@ -1099,10 +1089,8 @@ def main():
             batch.build_image()
             batch.push_image()
             batch.run_batch()
-            batch.process_results(args.postprocesscloud)
-            if not args.postprocesscloud:
-                # postprocesscloud is async, so don't want to clean before it's done
-                batch.clean()
+            batch.process_results()
+            # process_results is async, so don't do a clean (which would clean before it's done)
 
 
 if __name__ == "__main__":
