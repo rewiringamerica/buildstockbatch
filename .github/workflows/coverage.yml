@@ -29,7 +29,9 @@ jobs:
 
         # This step is here instead of in ci.yml because PRs from other forks
         # do not have write permission to the PR during a pull_request action.
+        # More information:
         # https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
+        # Example to follow:
         # https://github.com/5monkeys/cobertura-action/tree/master/.github/workflows
       - name: Report coverage to PR
         uses: 5monkeys/cobertura-action@v13
