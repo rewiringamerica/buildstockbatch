@@ -3,7 +3,7 @@ on:
   push:
     branches:
       - develop
-  pull_request_target:
+  pull_request:
     types:
       - synchronize
       - opened
@@ -67,14 +67,18 @@ jobs:
         with:
           name: coverage-report-html
           path: buildstockbatch/coverage/htmlreport/
-      - name: Report coverage to PR
-        uses: 5monkeys/cobertura-action@v13
+      - name: Save Coverage Report XML
+        uses: actions/upload-artifact@v3
         if: ${{ matrix.python-version == '3.11' }}
         with:
+          name: coverage-report-xml
           path: buildstockbatch/coverage/coverage.xml
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          minimum_coverage: 33
-          fail_below_threshold: true
+      - name: Coverage
+        uses: actions/upload-artifact@v2
+        with:
+          name: coverage
+          path: coverage/cobertura-coverage.xml
+
       - name: Build documentation
         if: ${{ matrix.python-version == '3.11' }}
         run: |
