@@ -81,6 +81,9 @@ def upload_directory_to_GCS(local_directory, bucket, prefix):
         source_directory=local_dir_abs,
         blob_name_prefix=prefix,
         raise_exception=True,
+        blob_constructor_kwargs={
+            "chunk_size": 5 * 1024 * 1024,  # 5 MB instead of the default 40 MB
+        },
     )
 
 
