@@ -39,5 +39,5 @@ jobs:
         with:
           path: buildstockbatch/coverage/coverage.xml
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          minimum_coverage: 33
+          minimum_coverage: 50
           fail_below_threshold: true
