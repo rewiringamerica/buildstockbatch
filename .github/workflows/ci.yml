@@ -73,7 +73,6 @@ jobs:
         with:
           name: coverage-report-xml
           path: buildstockbatch/coverage/coverage.xml
-
       - name: Build documentation
         if: ${{ matrix.python-version == '3.11' }}
         run: |
