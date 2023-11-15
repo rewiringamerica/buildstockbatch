@@ -652,7 +652,7 @@ class GcpBatch(DockerBatchBase):
             append_stat("Simulations", n_sims)
             append_stat("Tasks", task_group.task_count)
             append_stat("Parallelism", task_group.parallelism)
-            append_stat("milliCPU/task", task_spec.compute_resource.cpu_milli)
+            append_stat("mCPU/task", task_spec.compute_resource.cpu_milli)
             append_stat("MiB/task", task_spec.compute_resource.memory_mib)
             append_stat("Machine type", instance.machine_type)
             append_stat("Provisioning", instance.provisioning_model.name)
