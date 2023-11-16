@@ -1,12 +1,15 @@
 """Tests for the base class in docker_base.py. """
+from fsspec.implementations.local import LocalFileSystem
 import json
 import os
 import pathlib
+import shutil
 import tarfile
 import tempfile
 from unittest.mock import MagicMock, PropertyMock
 
 from buildstockbatch.cloud.docker_base import DockerBatchBase
+from buildstockbatch.utils import get_project_configuration
 
 here = os.path.dirname(os.path.abspath(__file__))
 resources_dir = os.path.join(here, "test_inputs", "test_openstudio_buildstock", "resources")
@@ -51,3 +54,61 @@ def test_prep_batches(basic_residential_project_file, mocker):
             assert job["job_num"] == 0
             assert job["n_datapoints"] == 5  # Total number of buildings
             assert len(job["batch"]) == 4  # Number of simulations in this batch
+
+
+def test_get_epws_to_download():
+    resources_dir_path = pathlib.Path(resources_dir)
+    options_file = resources_dir_path / "options_lookup.tsv"
+    buildstock_file = resources_dir_path / "buildstock_good.csv"
+
+    with tempfile.TemporaryDirectory(prefix="bsb_") as sim_dir_str:
+        sim_dir = pathlib.Path(sim_dir_str)
+        os.makedirs(sim_dir / "lib" / "resources")
+        os.makedirs(sim_dir / "lib" / "housing_characteristics")
+        shutil.copy(options_file, sim_dir / "lib" / "resources")
+        shutil.copy(buildstock_file, sim_dir / "lib" / "housing_characteristics" / "buildstock.csv")
+
+        jobs_d = {
+            "job_num": 0,
+            "n_datapoints": 10,
+            "batch": [
+                [1, None],
+                [5, None],
+            ],
+        }
+
+        epws = DockerBatchBase.get_epws_to_download(sim_dir, jobs_d)
+        assert epws == set(["weather/G0100970.epw", "weather/G0100830.epw"])
+
+
+def test_run_simulations(basic_residential_project_file):
+    jobs_d = {
+        "job_num": 0,
+        "n_datapoints": 10,
+        "batch": [
+            [1, None],
+            [5, None],
+        ],
+    }
+    fs = LocalFileSystem()
+    project_filename, results_dir = basic_residential_project_file()
+    cfg = get_project_configuration(project_filename)
+
+    with tempfile.TemporaryDirectory(prefix="bsb_") as temp_dir_str:
+        temp_path = pathlib.Path(temp_dir_str)
+        sim_dir = temp_path / "simdata" / "openstudio"
+        os.makedirs(sim_dir)
+        # sim_dir is also the working directory (defined in the nrel/openstudio
+        # Dockerfile), which some file operations depend on.
+        old_cwd = os.getcwd()
+        os.chdir(sim_dir)
+        bucket = temp_path / "bucket"
+        os.makedirs(bucket / "test_prefix" / "results" / "simulation_output")
+
+        DockerBatchBase.run_simulations(cfg, 0, jobs_d, sim_dir, fs, bucket, "test_prefix")
+
+        output_dir = bucket / "test_prefix" / "results" / "simulation_output"
+        assert sorted(os.listdir(output_dir)) == ["results_job0.json.gz", "simulations_job0.tar.gz"]
+        # Check that files were cleaned up correctly
+        assert not os.listdir(sim_dir)
+        os.chdir(old_cwd)
