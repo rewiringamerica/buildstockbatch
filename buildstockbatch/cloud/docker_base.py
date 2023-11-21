@@ -70,11 +70,12 @@ class DockerBatchBase(BuildStockBatchBase):
 
         :param tmppath:  Path to a temporary directory where files should be collected before uploading.
 
-        :returns: (job_count, unique_epws), where
+        :returns: (job_count, unique_epws, n_sims), where
             job_count: The number of jobs the samples were split into.
             unique_epws: A dictionary mapping from the hash of weather files to a list of filenames
                 with that hashed value. Only the first in each list is written to tmppath, so
                 this can be used to recreate the other files later.
+            n_sims: The total number of simulations to run.
         """
         # Generate buildstock.csv
         buildstock_csv_filename = self.sampler.run_sampling()
@@ -182,4 +183,4 @@ class DockerBatchBase(BuildStockBatchBase):
 
         os.makedirs(tmppath / "results" / "simulation_output")
 
-        return (job_count, unique_epws)
+        return (job_count, unique_epws, n_sims)

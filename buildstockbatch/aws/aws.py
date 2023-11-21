@@ -1595,7 +1595,7 @@ class AwsBatch(DockerBatchBase):
             self._weather_dir = tmp_weather_dir
             tmppath = pathlib.Path(tmpdir)
 
-            array_size, unique_epws = self.prep_batches(tmppath)
+            array_size, unique_epws, _ = self.prep_batches(tmppath)
 
             logger.debug("Uploading files to S3")
             upload_directory_to_s3(

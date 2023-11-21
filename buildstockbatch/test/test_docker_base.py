@@ -33,7 +33,7 @@ def test_prep_batches(basic_residential_project_file, mocker):
         dbb._weather_dir = tmp_weather_dir
         tmppath = pathlib.Path(tmpdir)
 
-        job_count, unique_epws = dbb.prep_batches(tmppath)
+        job_count, unique_epws, n_sims = dbb.prep_batches(tmppath)
         sampler_mock.run_sampling.assert_called_once()
 
         # Of the three test weather files, two are identical
@@ -45,6 +45,7 @@ def test_prep_batches(basic_residential_project_file, mocker):
         # Three job files should be created, with 10 total simulations, split
         # into batches of 4, 4, and 2 simulations.
         assert job_count == 3
+        assert n_sims == 10
         jobs_file_path = tmppath / "jobs.tar.gz"
         with tarfile.open(jobs_file_path, "r") as tar_f:
             all_job_files = ["jobs", "jobs/job00000.json", "jobs/job00001.json", "jobs/job00002.json"]
