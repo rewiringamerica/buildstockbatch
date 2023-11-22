@@ -12,7 +12,7 @@ here = os.path.dirname(os.path.abspath(__file__))
 resources_dir = os.path.join(here, "test_inputs", "test_openstudio_buildstock", "resources")
 
 
-def test_prep_batches(basic_residential_project_file, mocker):
+def test_prep_batch_files(basic_residential_project_file, mocker):
     """Test that samples are created and bundled into batches correctly."""
     project_filename, results_dir = basic_residential_project_file()
 
@@ -27,20 +27,15 @@ def test_prep_batches(basic_residential_project_file, mocker):
     dbb.batch_array_size = 3
     DockerBatchBase.validate_project = MagicMock(return_value=True)
 
-    with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir, tempfile.TemporaryDirectory(
-        prefix="bsb_"
-    ) as tmp_weather_dir:
-        dbb._weather_dir = tmp_weather_dir
+    with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir:
         tmppath = pathlib.Path(tmpdir)
-
-        job_count, unique_epws = dbb.prep_batches(tmppath)
+        epws_to_copy, n_sims, job_count = dbb._prep_batch_files(tmppath)
         sampler_mock.run_sampling.assert_called_once()
 
-        # Of the three test weather files, two are identical
-        assert sorted([sorted(i) for i in unique_epws.values()]) == [
-            ["G2500210.epw"],
-            ["G2601210.epw", "G2601390.epw"],
-        ]
+        # Of the three test weather files, two are identical. validate the two
+        src, dest = epws_to_copy[0]
+        assert src == "G2601210.epw"
+        assert dest == "G2601390.epw"
 
         # Three job files should be created, with 10 total simulations, split
         # into batches of 4, 4, and 2 simulations.

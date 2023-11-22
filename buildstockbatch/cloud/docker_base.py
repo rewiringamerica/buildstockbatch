@@ -245,26 +245,36 @@ class DockerBatchBase(BuildStockBatchBase):
         """
         with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir:
             tmppath = pathlib.Path(tmpdir)
-
-            # Weather files
-            logger.info("Prepping weather files...")
-            epws_to_copy = self.prep_weather_files_for_batch(tmppath)
-
-            # Assets
-            self.prep_assets_for_batch(tmppath)
-
-            # Project configuration
-            logger.info("Writing project configuration for upload")
-            with open(tmppath / "config.json", "wt", encoding="utf-8") as f:
-                json.dump(self.cfg, f)
-
-            # Collect simulations to queue
-            n_sims, job_count = self.prep_jobs_for_batch(tmppath)
+            epws_to_copy, n_sims, job_count = self._prep_batch_files(tmppath)
 
             # Copy all the files to cloud storage
             logger.info("Uploading files for batch...")
             self.upload_batch_files_to_cloud(tmppath)
-            logger.debug("Copying duplicate weather files...")
+
+            logger.info("Copying duplicate weather files...")
             self.copy_files_at_cloud(epws_to_copy)
 
-        return (n_sims, job_count)
+            return (n_sims, job_count)
+
+
+    def _prep_batch_files(self, tmppath):
+        """
+        Split out for testability (so test can manage and inspect the contents of the tmppath).
+        """
+
+        # Weather files
+        logger.info("Prepping weather files...")
+        epws_to_copy = self.prep_weather_files_for_batch(tmppath)
+
+        # Assets
+        self.prep_assets_for_batch(tmppath)
+
+        # Project configuration
+        logger.info("Writing project configuration for upload")
+        with open(tmppath / "config.json", "wt", encoding="utf-8") as f:
+            json.dump(self.cfg, f)
+
+        # Collect simulations to queue
+        n_sims, job_count = self.prep_jobs_for_batch(tmppath)
+
+        return (epws_to_copy, n_sims, job_count)
