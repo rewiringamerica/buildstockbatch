@@ -20,6 +20,7 @@ import pathlib
 import random
 import shutil
 import tarfile
+import tempfile
 import time
 
 from buildstockbatch.base import BuildStockBatchBase
@@ -56,30 +57,96 @@ class DockerBatchBase(BuildStockBatchBase):
     def weather_dir(self):
         return self._weather_dir
 
-    def prep_batches(self, tmppath):
+    def upload_batch_files_to_cloud(self, tmppath):
+        """ Upload all files in ``tmppath`` to the cloud (where they will be used by the batch
+        jobs).
         """
-        Prepare batches of samples to be uploaded and run in the cloud.
+        raise NotImplementedError
 
-        This will:
-            - Perform the sampling
-            - Split the samples into (at most) self.batch_array_size batches
-            - Collect and package and the required assets, including weather
-              files, and write them to tmppath.
+    def copy_files_at_cloud(self, files_to_copy):
+        """Copy files from-cloud-to-cloud storage. This is used to avoid using bandwidth to upload
+        duplicate files.
 
-        self.weather_dir must exist before calling this method. This is where weather files are stored temporarily.
-
-        :param tmppath:  Path to a temporary directory where files should be collected before uploading.
-
-        :returns: (job_count, unique_epws), where
-            job_count: The number of jobs the samples were split into.
-            unique_epws: A dictionary mapping from the hash of weather files to a list of filenames
-                with that hashed value. Only the first in each list is written to tmppath, so
-                this can be used to recreate the other files later.
+        :param files_to_copy: a dict where the key is the relative path to a "source" filename to
+            copy, and the value is a list of relative paths to copy the source file to. All paths
+            are relative to the ``tmppath`` used in ``prep_batches()`` (so the implementation should
+            prepend the bucket name and prefix where they were uploaded to by
+            ``upload_batch_files_to_cloud``).
         """
-        # Generate buildstock.csv
-        buildstock_csv_filename = self.sampler.run_sampling()
+        raise NotImplementedError
 
-        self._get_weather_files()
+    def prep_weather_files_for_batch(self, tmppath):
+        """Downloads, if necessary, and extracts weather files to ``self._weather_dir``.
+
+        Because there may be duplicate weather files, this also identifies duplicates to avoid
+        redundant compression work and uploading to the cloud.
+
+        It will put unique files in the ``tmppath`` (in the 'weather' subdir), and return a dict of
+        duplicates. This will allow the duplicates to be recreated on the cloud via copying
+        from-cloud-to-cloud rather than reuploading duplicates.
+
+        :param tmppath: Unique weather files (compressed) will be copied into a 'weather' subdir
+            of this path.
+
+        :returns: a dict of the filenames of unique weather files to the names of duplicate weather
+            files. After the files in the ``tmppath``, which includes the unique weather files, have
+            been uploaded, then a quick cloud-to-cloud copy can be used to recreate the duplicates
+            on the cloud (without having to upload them).
+        """
+        with tempfile.TemporaryDirectory(prefix="bsb_" ) as tmp_weather_in_dir:
+            self._weather_dir = tmp_weather_in_dir
+
+            # Downloads, if necessary, and extracts weather files to ``self._weather_dir``
+            self._get_weather_files()
+
+            # Determine the unique weather files
+            epw_filenames = list(filter(lambda x: x.endswith(".epw"), os.listdir(self.weather_dir)))
+            logger.info("Calculating hashes for weather files")
+            epw_hashes = Parallel(n_jobs=-1, verbose=9)(
+                delayed(calc_hash_for_file)(pathlib.Path(self.weather_dir) / epw_filename) for epw_filename in epw_filenames
+            )
+            # keep track of unique EPWs that may have dupes, and to compress and upload to cloud
+            unique_epws = collections.defaultdict(list)
+            # keep track of duplicates of the unique EPWs to copy (from cloud-to-cloud)
+            epws_to_copy = []
+            for epw_filename, epw_hash in zip(epw_filenames, epw_hashes):
+                if bool(unique_epws[epw_hash]):
+                    # not the first file with this hash (it's a duplicate). add to ``epws_to_copy``
+                    if epw_filename == unique_epws[epw_hash][0]:
+                        raise NotImplementedError #todo-xxxxx
+                    epws_to_copy.append((unique_epws[epw_hash][0], epw_filename))
+                unique_epws[epw_hash].append(epw_filename)
+
+            # Compress unique weather files and save to ``tmp_weather_out_path``, which will get
+            # uploaded to cloud storage
+            logger.info("Compressing unique weather files")
+            tmp_weather_out_path = tmppath / "weather"
+            os.makedirs(tmp_weather_out_path)
+            Parallel(n_jobs=-1, verbose=9)(
+                delayed(compress_file)(
+                    pathlib.Path(self.weather_dir) / x[0],
+                    str(tmp_weather_out_path / x[0]) + ".gz",
+                    )
+                for x in unique_epws.values()
+            )
+
+            # Calculate and print savings of duplicate files
+            total_count = 0
+            dupe_count = 0
+            dupe_bytes = 0
+            for epws in unique_epws.values():
+                count = len(epws)
+                total_count += count
+                if (count > 1):
+                    dupe_count += count - 1
+                    bytes = os.path.getsize(str(tmp_weather_out_path / epws[0]) + ".gz") * dupe_count
+                    dupe_bytes = bytes * (count - 1)
+            logger.info(f"Identified {dupe_count:,} duplicate weather files "
+                        f"({len(unique_epws):,} unique, {total_count:,} total); "
+                        f"saved from uploading {(dupe_bytes / 1024 / 1024):,.1f} MiB")
+            return epws_to_copy
+
+    def prep_assets_for_batch(self, tmppath):
         logger.debug("Creating assets tarfile")
         with tarfile.open(tmppath / "assets.tar.gz", "x:gz") as tar_f:
             project_path = pathlib.Path(self.project_dir)
@@ -89,42 +156,16 @@ class DockerBatchBase(BuildStockBatchBase):
                 tar_f.add(
                     buildstock_path / "resources/hpxml-measures",
                     "resources/hpxml-measures",
-                )
+                    )
             tar_f.add(buildstock_path / "resources", "lib/resources")
             tar_f.add(
                 project_path / "housing_characteristics",
                 "lib/housing_characteristics",
-            )
+                )
 
-        # Weather files
-        weather_path = tmppath / "weather"
-        os.makedirs(weather_path)
-
-        # Determine the unique weather files
-        epw_filenames = list(filter(lambda x: x.endswith(".epw"), os.listdir(self.weather_dir)))
-        logger.debug("Calculating hashes for weather files")
-        epw_hashes = Parallel(n_jobs=-1, verbose=9)(
-            delayed(calc_hash_for_file)(pathlib.Path(self.weather_dir) / epw_filename) for epw_filename in epw_filenames
-        )
-        unique_epws = collections.defaultdict(list)
-        for epw_filename, epw_hash in zip(epw_filenames, epw_hashes):
-            unique_epws[epw_hash].append(epw_filename)
-
-        # Compress unique weather files
-        logger.debug("Compressing weather files")
-        Parallel(n_jobs=-1, verbose=9)(
-            delayed(compress_file)(
-                pathlib.Path(self.weather_dir) / x[0],
-                str(weather_path / x[0]) + ".gz",
-            )
-            for x in unique_epws.values()
-        )
-
-        logger.debug("Writing project configuration for upload")
-        with open(tmppath / "config.json", "wt", encoding="utf-8") as f:
-            json.dump(self.cfg, f)
-
-        # Collect simulations to queue
+    def prep_jobs_for_batch(self, tmppath):
+        # Generate buildstock.csv
+        buildstock_csv_filename = self.sampler.run_sampling()
         df = read_csv(buildstock_csv_filename, index_col=0, dtype=str)
         self.validate_buildstock_csv(self.project_filename, df)
         building_ids = df.index.tolist()
@@ -180,6 +221,50 @@ class DockerBatchBase(BuildStockBatchBase):
         logger.debug("Done compressing job jsons using gz {:.1f} seconds".format(tick))
         shutil.rmtree(jobs_dir)
 
-        os.makedirs(tmppath / "results" / "simulation_output")
+        return n_sims, job_count
 
-        return (job_count, unique_epws)
+
+    def prep_batches(self):
+        """
+        Prepare batches of samples to be uploaded and run in the cloud.
+
+        This will prepare all the files needed by the Batch jobs, including:
+            - Weather files
+            - Assets
+            - Sampling, and splitting the samples into (at most) ``self.batch_array_size`` batches
+
+        It will then upload all of those files, excluding duplicate weather files. It will use
+        ``copy_files_at_cloud`` to copy the duplicate files (instead of uploading them).
+
+        ``self.weather_dir`` must exist before calling this method. This is where weather files are
+        stored temporarily.
+
+        :returns: (n_sims, job_count), where
+            ``n_sims``: The total number of simulations that will be run.
+            ``job_count``: The number of jobs the samples were split into.
+        """
+        with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir:
+            tmppath = pathlib.Path(tmpdir)
+
+            # Weather files
+            logger.info("Prepping weather files...")
+            epws_to_copy = self.prep_weather_files_for_batch(tmppath)
+
+            # Assets
+            self.prep_assets_for_batch(tmppath)
+
+            # Project configuration
+            logger.info("Writing project configuration for upload")
+            with open(tmppath / "config.json", "wt", encoding="utf-8") as f:
+                json.dump(self.cfg, f)
+
+            # Collect simulations to queue
+            n_sims, job_count = self.prep_jobs_for_batch(tmppath)
+
+            # Copy all the files to cloud storage
+            logger.info("Uploading files for batch...")
+            self.upload_batch_files_to_cloud(tmppath)
+            logger.debug("Copying duplicate weather files...")
+            self.copy_files_at_cloud(epws_to_copy)
+
+        return (n_sims, job_count)
