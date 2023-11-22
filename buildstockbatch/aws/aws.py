@@ -1592,9 +1592,9 @@ class AwsBatch(DockerBatchBase):
         Parallel(n_jobs=-1, verbose=9)(
             delayed(copy_s3_file)(
                 bucket,
-                f"{self.cfg['aws']['s3']['prefix']}/weather/{src}.gz",
+                f"{self.cfg['aws']['s3']['prefix']}/weather/{src}",
                 bucket,
-                f"{self.cfg['aws']['s3']['prefix']}/weather/{dest}.gz",
+                f"{self.cfg['aws']['s3']['prefix']}/weather/{dest}",
             ) for src, dest in files_to_copy
         )
 

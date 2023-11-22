@@ -418,9 +418,9 @@ class GcpBatch(DockerBatchBase):
         Parallel(n_jobs=-1, verbose=9)(
             delayed(copy_GCS_file)(
                 self.gcs_bucket,
-                f"{self.gcs_prefix}/weather/{src}.gz",
+                f"{self.gcs_prefix}/weather/{src}",
                 self.gcs_bucket,
-                f"{self.gcs_prefix}/weather/{dest}.gz",
+                f"{self.gcs_prefix}/weather/{dest}",
             ) for src, dest in files_to_copy
         )
 

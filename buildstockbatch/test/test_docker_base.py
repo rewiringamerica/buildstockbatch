@@ -40,8 +40,8 @@ def test_prep_batch_files(basic_residential_project_file, mocker):
         assert os.path.isfile(tmppath / "weather" / "G2601210.epw.gz") or \
                os.path.isfile(tmppath / "weather" / "G2601390.epw.gz")
         src, dest = epws_to_copy[0]
-        assert src == "G2601210.epw" or src == "G2601390.epw"
-        assert dest == "G2601210.epw" or dest == "G2601390.epw"
+        assert src == "G2601210.epw.gz" or src == "G2601390.epw.gz"
+        assert dest == "G2601210.epw.gz" or dest == "G2601390.epw.gz"
         assert src != dest
 
         # Three job files should be created, with 10 total simulations, split
