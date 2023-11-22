@@ -89,7 +89,6 @@ def copy_GCS_file(src_bucket, src_name, dest_bucket, dest_name):
     source_bucket = storage_client.bucket(src_bucket)
     source_blob = source_bucket.blob(src_name)
     destination_bucket = storage_client.bucket(dest_bucket)
-    #todo-xxxx
     source_bucket.copy_blob(source_blob, destination_bucket, dest_name)
 
 

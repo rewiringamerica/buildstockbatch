@@ -32,10 +32,17 @@ def test_prep_batch_files(basic_residential_project_file, mocker):
         epws_to_copy, n_sims, job_count = dbb._prep_batch_files(tmppath)
         sampler_mock.run_sampling.assert_called_once()
 
-        # Of the three test weather files, two are identical. validate the two
+        # There are three weather files...
+        #   * "G2500210.epw" is unique; check for it (gz'd) in tmppath
+        #   * "G2601210.epw" and "G2601390.epw" are dupes. One should be in
+        #     tmppath; one should be copied to the other according to ``epws_to_copy``
+        assert os.path.isfile(tmppath / "weather" / "G2500210.epw.gz")
+        assert os.path.isfile(tmppath / "weather" / "G2601210.epw.gz") or \
+               os.path.isfile(tmppath / "weather" / "G2601390.epw.gz")
         src, dest = epws_to_copy[0]
-        assert src == "G2601210.epw"
-        assert dest == "G2601390.epw"
+        assert src == "G2601210.epw" or src == "G2601390.epw"
+        assert dest == "G2601210.epw" or dest == "G2601390.epw"
+        assert src != dest
 
         # Three job files should be created, with 10 total simulations, split
         # into batches of 4, 4, and 2 simulations.

@@ -112,8 +112,6 @@ class DockerBatchBase(BuildStockBatchBase):
             for epw_filename, epw_hash in zip(epw_filenames, epw_hashes):
                 if bool(unique_epws[epw_hash]):
                     # not the first file with this hash (it's a duplicate). add to ``epws_to_copy``
-                    if epw_filename == unique_epws[epw_hash][0]:
-                        raise NotImplementedError #todo-xxxxx
                     epws_to_copy.append((unique_epws[epw_hash][0], epw_filename))
                 unique_epws[epw_hash].append(epw_filename)
 
