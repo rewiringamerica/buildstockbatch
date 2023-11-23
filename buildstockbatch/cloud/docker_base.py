@@ -67,11 +67,10 @@ class DockerBatchBase(BuildStockBatchBase):
         """Copy files from-cloud-to-cloud storage. This is used to avoid using bandwidth to upload
         duplicate files.
 
-        :param files_to_copy: a dict where the key is the relative path to a "source" filename to
-            copy, and the value is a list of relative paths to copy the source file to. All paths
-            are relative to the ``tmppath`` used in ``prep_batches()`` (so the implementation should
-            prepend the bucket name and prefix where they were uploaded to by
-            ``upload_batch_files_to_cloud``).
+        :param files_to_copy: a dict where the key is a file on the cloud to copy, and the value is
+            the filename to copy the source file to. Both are relative to the ``tmppath`` used in
+            ``prep_batches()`` (so the implementation should prepend the bucket name and prefix
+            where they were uploaded to by ``upload_batch_files_to_cloud``).
         """
         raise NotImplementedError
 
@@ -79,19 +78,20 @@ class DockerBatchBase(BuildStockBatchBase):
         """Downloads, if necessary, and extracts weather files to ``self._weather_dir``.
 
         Because there may be duplicate weather files, this also identifies duplicates to avoid
-        redundant compression work and uploading to the cloud.
+        redundant compression work and bytes uploaded to the cloud.
 
-        It will put unique files in the ``tmppath`` (in the 'weather' subdir), and return a dict of
-        duplicates. This will allow the duplicates to be recreated on the cloud via copying
-        from-cloud-to-cloud rather than reuploading duplicates.
+        It will put unique files in the ``tmppath`` (in the 'weather' subdir) which will get
+        uploaded to the cloud along with other batch files. It will also return a list of
+        duplicates. This will allow the duplicates to be quickly recreated on the cloud via copying
+        from-cloud-to-cloud.
 
         :param tmppath: Unique weather files (compressed) will be copied into a 'weather' subdir
             of this path.
 
-        :returns: a dict of the filenames of unique weather files to the names of duplicate weather
-            files. After the files in the ``tmppath``, which includes the unique weather files, have
-            been uploaded, then a quick cloud-to-cloud copy can be used to recreate the duplicates
-            on the cloud (without having to upload them).
+        :returns: an array of tuples where the first value is the filename of a file that will be
+            uploaded to cloud storage (because it's in the ``tmppath``), and the second value is the
+            filename that the first should be copied to.
+            For example, ``[("G2601210.epw.gz", "G2601390.epw.gz")]``.
         """
         with tempfile.TemporaryDirectory(prefix="bsb_" ) as tmp_weather_in_dir:
             self._weather_dir = tmp_weather_in_dir
@@ -103,7 +103,9 @@ class DockerBatchBase(BuildStockBatchBase):
             epw_filenames = list(filter(lambda x: x.endswith(".epw"), os.listdir(self.weather_dir)))
             logger.info("Calculating hashes for weather files")
             epw_hashes = Parallel(n_jobs=-1, verbose=9)(
-                delayed(calc_hash_for_file)(pathlib.Path(self.weather_dir) / epw_filename) for epw_filename in epw_filenames
+                delayed(calc_hash_for_file)(
+                    pathlib.Path(self.weather_dir) / epw_filename
+                ) for epw_filename in epw_filenames
             )
             # keep track of unique EPWs that may have dupes, and to compress and upload to cloud
             unique_epws = collections.defaultdict(list)
