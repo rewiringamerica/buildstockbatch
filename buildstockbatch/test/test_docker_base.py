@@ -29,7 +29,7 @@ def test_prep_batch_files(basic_residential_project_file, mocker):
 
     with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir:
         tmppath = pathlib.Path(tmpdir)
-        epws_to_copy, n_sims, job_count = dbb._prep_batch_files(tmppath)
+        epws_to_copy, batch_info = dbb._prep_batch_files(tmppath)
         sampler_mock.run_sampling.assert_called_once()
 
         # There are three weather files...
@@ -41,13 +41,15 @@ def test_prep_batch_files(basic_residential_project_file, mocker):
             tmppath / "weather" / "G2601390.epw.gz"
         )
         src, dest = epws_to_copy[0]
-        assert src == "G2601210.epw.gz" or src == "G2601390.epw.gz"
-        assert dest == "G2601210.epw.gz" or dest == "G2601390.epw.gz"
+        assert src in ("G2601210.epw.gz", "G2601390.epw.gz")
+        assert dest in ("G2601210.epw.gz", "G2601390.epw.gz")
         assert src != dest
 
         # Three job files should be created, with 10 total simulations, split
         # into batches of 4, 4, and 2 simulations.
-        assert job_count == 3
+        assert batch_info.n_sims == 10
+        assert batch_info.n_sims_per_job == 4
+        assert batch_info.job_count == 3
         jobs_file_path = tmppath / "jobs.tar.gz"
         with tarfile.open(jobs_file_path, "r") as tar_f:
             all_job_files = ["jobs", "jobs/job00000.json", "jobs/job00001.json", "jobs/job00002.json"]
