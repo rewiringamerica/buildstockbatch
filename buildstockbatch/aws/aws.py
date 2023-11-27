@@ -1595,9 +1595,9 @@ class AwsBatch(DockerBatchBase):
                 f"{self.cfg['aws']['s3']['prefix']}/weather/{src}",
                 bucket,
                 f"{self.cfg['aws']['s3']['prefix']}/weather/{dest}",
-            ) for src, dest in files_to_copy
+            )
+            for src, dest in files_to_copy
         )
-
 
     def run_batch(self):
         """

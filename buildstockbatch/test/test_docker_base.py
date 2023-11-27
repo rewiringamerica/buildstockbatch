@@ -37,8 +37,9 @@ def test_prep_batch_files(basic_residential_project_file, mocker):
         #   * "G2601210.epw" and "G2601390.epw" are dupes. One should be in
         #     tmppath; one should be copied to the other according to ``epws_to_copy``
         assert os.path.isfile(tmppath / "weather" / "G2500210.epw.gz")
-        assert os.path.isfile(tmppath / "weather" / "G2601210.epw.gz") or \
-               os.path.isfile(tmppath / "weather" / "G2601390.epw.gz")
+        assert os.path.isfile(tmppath / "weather" / "G2601210.epw.gz") or os.path.isfile(
+            tmppath / "weather" / "G2601390.epw.gz"
+        )
         src, dest = epws_to_copy[0]
         assert src == "G2601210.epw.gz" or src == "G2601390.epw.gz"
         assert dest == "G2601210.epw.gz" or dest == "G2601390.epw.gz"

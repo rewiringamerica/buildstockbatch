@@ -58,7 +58,7 @@ class DockerBatchBase(BuildStockBatchBase):
         return self._weather_dir
 
     def upload_batch_files_to_cloud(self, tmppath):
-        """ Upload all files in ``tmppath`` to the cloud (where they will be used by the batch
+        """Upload all files in ``tmppath`` to the cloud (where they will be used by the batch
         jobs).
         """
         raise NotImplementedError
@@ -93,7 +93,7 @@ class DockerBatchBase(BuildStockBatchBase):
             filename that the first should be copied to.
             For example, ``[("G2601210.epw.gz", "G2601390.epw.gz")]``.
         """
-        with tempfile.TemporaryDirectory(prefix="bsb_" ) as tmp_weather_in_dir:
+        with tempfile.TemporaryDirectory(prefix="bsb_") as tmp_weather_in_dir:
             self._weather_dir = tmp_weather_in_dir
 
             # Downloads, if necessary, and extracts weather files to ``self._weather_dir``
@@ -103,9 +103,8 @@ class DockerBatchBase(BuildStockBatchBase):
             epw_filenames = list(filter(lambda x: x.endswith(".epw"), os.listdir(self.weather_dir)))
             logger.info("Calculating hashes for weather files")
             epw_hashes = Parallel(n_jobs=-1, verbose=9)(
-                delayed(calc_hash_for_file)(
-                    pathlib.Path(self.weather_dir) / epw_filename
-                ) for epw_filename in epw_filenames
+                delayed(calc_hash_for_file)(pathlib.Path(self.weather_dir) / epw_filename)
+                for epw_filename in epw_filenames
             )
             # keep track of unique EPWs that may have dupes, and to compress and upload to cloud
             unique_epws = collections.defaultdict(list)
@@ -126,7 +125,7 @@ class DockerBatchBase(BuildStockBatchBase):
                 delayed(compress_file)(
                     pathlib.Path(self.weather_dir) / x[0],
                     str(tmp_weather_out_path / x[0]) + ".gz",
-                    )
+                )
                 for x in unique_epws.values()
             )
 
@@ -137,13 +136,15 @@ class DockerBatchBase(BuildStockBatchBase):
             for epws in unique_epws.values():
                 count = len(epws)
                 total_count += count
-                if (count > 1):
+                if count > 1:
                     dupe_count += count - 1
                     bytes = os.path.getsize(str(tmp_weather_out_path / epws[0]) + ".gz") * dupe_count
                     dupe_bytes = bytes * (count - 1)
-            logger.info(f"Identified {dupe_count:,} duplicate weather files "
-                        f"({len(unique_epws):,} unique, {total_count:,} total); "
-                        f"saved from uploading {(dupe_bytes / 1024 / 1024):,.1f} MiB")
+            logger.info(
+                f"Identified {dupe_count:,} duplicate weather files "
+                f"({len(unique_epws):,} unique, {total_count:,} total); "
+                f"saved from uploading {(dupe_bytes / 1024 / 1024):,.1f} MiB"
+            )
             return epws_to_copy
 
     def prep_assets_for_batch(self, tmppath):
@@ -156,12 +157,12 @@ class DockerBatchBase(BuildStockBatchBase):
                 tar_f.add(
                     buildstock_path / "resources/hpxml-measures",
                     "resources/hpxml-measures",
-                    )
+                )
             tar_f.add(buildstock_path / "resources", "lib/resources")
             tar_f.add(
                 project_path / "housing_characteristics",
                 "lib/housing_characteristics",
-                )
+            )
 
     def prep_jobs_for_batch(self, tmppath):
         # Generate buildstock.csv
@@ -223,7 +224,6 @@ class DockerBatchBase(BuildStockBatchBase):
 
         return n_sims, job_count
 
-
     def prep_batches(self):
         """
         Prepare batches of samples to be uploaded and run in the cloud.
@@ -255,7 +255,6 @@ class DockerBatchBase(BuildStockBatchBase):
             self.copy_files_at_cloud(epws_to_copy)
 
             return (n_sims, job_count)
-
 
     def _prep_batch_files(self, tmppath):
         """

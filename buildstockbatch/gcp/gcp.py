@@ -408,7 +408,6 @@ class GcpBatch(DockerBatchBase):
                     task_counts[status] += count
             logger.info(f"  Task statuses: {dict(task_counts)}")
 
-
     def upload_batch_files_to_cloud(self, tmppath):
         logger.info("Uploading Batch files to Cloud Storage")
         upload_directory_to_GCS(tmppath, self.gcs_bucket, self.gcs_prefix + "/")
@@ -421,7 +420,8 @@ class GcpBatch(DockerBatchBase):
                 f"{self.gcs_prefix}/weather/{src}",
                 self.gcs_bucket,
                 f"{self.gcs_prefix}/weather/{dest}",
-            ) for src, dest in files_to_copy
+            )
+            for src, dest in files_to_copy
         )
 
     def run_batch(self):
