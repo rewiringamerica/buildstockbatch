@@ -10,6 +10,7 @@ This is the base class mixed into classes that deploy using a docker container.
 """
 import collections
 import docker
+from dataclasses import dataclass
 import itertools
 from joblib import Parallel, delayed
 import json
@@ -31,6 +32,19 @@ logger = logging.getLogger(__name__)
 
 class DockerBatchBase(BuildStockBatchBase):
     """Base class for implementations that run in Docker containers."""
+
+    @dataclass
+    class BatchInfo:
+        """Information about the Batch jobs to be run."""
+
+        # The total number of simulations that will be run.
+        n_sims: int
+
+        # The total number of simulations that each job will run.
+        n_sims_per_job: int
+
+        # The number of jobs the samples were split into.
+        job_count: int
 
     CONTAINER_RUNTIME = ContainerRuntime.DOCKER
     MAX_JOB_COUNT = 10000
@@ -222,7 +236,7 @@ class DockerBatchBase(BuildStockBatchBase):
         logger.debug("Done compressing job jsons using gz {:.1f} seconds".format(tick))
         shutil.rmtree(jobs_dir)
 
-        return n_sims, job_count
+        return DockerBatchBase.BatchInfo(n_sims=n_sims, n_sims_per_job=n_sims_per_job, job_count=job_count)
 
     def prep_batches(self):
         """
@@ -239,13 +253,11 @@ class DockerBatchBase(BuildStockBatchBase):
         ``self.weather_dir`` must exist before calling this method. This is where weather files are
         stored temporarily.
 
-        :returns: (n_sims, job_count), where
-            ``n_sims``: The total number of simulations that will be run.
-            ``job_count``: The number of jobs the samples were split into.
+        :returns: DockerBatchBase.BatchInfo
         """
         with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir:
             tmppath = pathlib.Path(tmpdir)
-            epws_to_copy, n_sims, job_count = self._prep_batch_files(tmppath)
+            epws_to_copy, batch_info = self._prep_batch_files(tmppath)
 
             # Copy all the files to cloud storage
             logger.info("Uploading files for batch...")
@@ -254,7 +266,7 @@ class DockerBatchBase(BuildStockBatchBase):
             logger.info("Copying duplicate weather files...")
             self.copy_files_at_cloud(epws_to_copy)
 
-            return (n_sims, job_count)
+            return batch_info
 
     def _prep_batch_files(self, tmppath):
         """
@@ -274,6 +286,6 @@ class DockerBatchBase(BuildStockBatchBase):
             json.dump(self.cfg, f)
 
         # Collect simulations to queue
-        n_sims, job_count = self.prep_jobs_for_batch(tmppath)
+        batch_info = self.prep_jobs_for_batch(tmppath)
 
-        return (epws_to_copy, n_sims, job_count)
+        return (epws_to_copy, batch_info)

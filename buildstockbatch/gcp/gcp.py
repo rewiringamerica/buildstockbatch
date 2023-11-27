@@ -446,7 +446,7 @@ class GcpBatch(DockerBatchBase):
             - kick off a batch simulation on GCP
         """
         # Prepare batches of work
-        n_sims, task_count = self.prep_batches()
+        batch_info = self.prep_batches()
 
         # Define and run the GCP Batch job.
         logger.info("Setting up GCP Batch job")
@@ -477,7 +477,7 @@ class GcpBatch(DockerBatchBase):
         )
 
         # Give three minutes per simulation, plus ten minutes for job overhead
-        task_duration_secs = 60 * (10 + n_sims_per_job * 3)
+        task_duration_secs = 60 * (10 + batch_info.n_sims_per_job * 3)
         task = batch_v1.TaskSpec(
             runnables=[runnable],
             compute_resource=resources,
@@ -496,7 +496,7 @@ class GcpBatch(DockerBatchBase):
 
         # How many of these tasks to run.
         group = batch_v1.TaskGroup(
-            task_count=task_count,
+            task_count=batch_info.job_count,
             task_spec=task,
         )
 
@@ -544,7 +544,7 @@ class GcpBatch(DockerBatchBase):
         # Monitor job status while waiting for the job to complete
         n_succeeded_last_time = 0
         client = batch_v1.BatchServiceClient()
-        with tqdm.tqdm(desc="Running Simulations", total=task_count, unit="batch") as progress_bar:
+        with tqdm.tqdm(desc="Running Simulations", total=batch_info.job_count, unit="batch") as progress_bar:
             job_status = None
             while job_status not in ("SUCCEEDED", "FAILED", "DELETION_IN_PROGRESS"):
                 time.sleep(10)
@@ -579,7 +579,7 @@ class GcpBatch(DockerBatchBase):
                 keys.append(str(key).rjust(width))
                 values.append(str(value).rjust(width))
 
-            append_stat("Simulations", n_sims)
+            append_stat("Simulations", batch_info.n_sims)
             append_stat("Tasks", task_group.task_count)
             append_stat("Parallelism", task_group.parallelism)
             append_stat("mCPU/task", task_spec.compute_resource.cpu_milli)

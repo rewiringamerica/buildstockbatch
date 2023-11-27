@@ -1609,7 +1609,7 @@ class AwsBatch(DockerBatchBase):
             - kick off a batch simulation on AWS
         """
         # Prepare batches of work
-        n_sims, array_size = self.prep_batches()
+        batch_info = self.prep_batches()
 
         # Create the output directories
         fs = S3FileSystem()
@@ -1666,7 +1666,7 @@ class AwsBatch(DockerBatchBase):
         batch_env.create_emr_cluster_function()
 
         # start job
-        batch_env.start_state_machine_execution(array_size)
+        batch_env.start_state_machine_execution(batch_info.job_count)
 
         logger.info("Batch job submitted. Check your email to subscribe to notifications.")
 
