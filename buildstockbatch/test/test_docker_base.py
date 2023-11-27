@@ -12,7 +12,7 @@ here = os.path.dirname(os.path.abspath(__file__))
 resources_dir = os.path.join(here, "test_inputs", "test_openstudio_buildstock", "resources")
 
 
-def test_prep_batch_files(basic_residential_project_file, mocker):
+def test_run_batch_prep(basic_residential_project_file, mocker):
     """Test that samples are created and bundled into batches correctly."""
     project_filename, results_dir = basic_residential_project_file()
 
@@ -29,7 +29,7 @@ def test_prep_batch_files(basic_residential_project_file, mocker):
 
     with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir:
         tmppath = pathlib.Path(tmpdir)
-        epws_to_copy, batch_info = dbb._prep_batch_files(tmppath)
+        epws_to_copy, batch_info = dbb._run_batch_prep(tmppath)
         sampler_mock.run_sampling.assert_called_once()
 
         # There are three weather files...

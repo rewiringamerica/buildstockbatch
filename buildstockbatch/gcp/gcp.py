@@ -25,17 +25,13 @@ import gzip
 from joblib import Parallel, delayed
 import json
 import io
-import itertools
 import logging
-import math
 import os
 import pathlib
-import random
 import re
 import shutil
 import subprocess
 import tarfile
-import tempfile
 import time
 import tqdm
 
@@ -50,11 +46,8 @@ from buildstockbatch import postprocessing
 from buildstockbatch.cloud.docker_base import DockerBatchBase
 from buildstockbatch.exc import ValidationError
 from buildstockbatch.utils import (
-    calc_hash_for_file,
-    compress_file,
     get_project_configuration,
     log_error_details,
-    read_csv,
 )
 
 
@@ -421,10 +414,12 @@ class GcpBatch(DockerBatchBase):
         logger.info(f"See all Cloud Run jobs at https://console.cloud.google.com/run/jobs?project={self.gcp_project}")
 
     def upload_batch_files_to_cloud(self, tmppath):
+        """Implements :func:`DockerBase.upload_batch_files_to_cloud`"""
         logger.info("Uploading Batch files to Cloud Storage")
         upload_directory_to_GCS(tmppath, self.gcs_bucket, self.gcs_prefix + "/")
 
     def copy_files_at_cloud(self, files_to_copy):
+        """Implements :func:`DockerBase.copy_files_at_cloud`"""
         logger.info("Copying weather files at Cloud Storage")
         Parallel(n_jobs=-1, verbose=9)(
             delayed(copy_GCS_file)(
@@ -436,18 +431,8 @@ class GcpBatch(DockerBatchBase):
             for src, dest in files_to_copy
         )
 
-    def run_batch(self):
-        """
-        Start the GCP Batch job to run all the building simulations.
-
-        This will
-            - perform the sampling
-            - package and upload the assets, including weather
-            - kick off a batch simulation on GCP
-        """
-        # Prepare batches of work
-        batch_info = self.prep_batches()
-
+    def start_batch_job(self, batch_info):
+        """Implements :func:`DockerBase.start_batch_job`"""
         # Define and run the GCP Batch job.
         logger.info("Setting up GCP Batch job")
         client = batch_v1.BatchServiceClient()

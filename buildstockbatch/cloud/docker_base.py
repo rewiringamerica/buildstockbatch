@@ -88,7 +88,74 @@ class DockerBatchBase(BuildStockBatchBase):
         """
         raise NotImplementedError
 
-    def prep_weather_files_for_batch(self, tmppath):
+    def start_batch_job(self, batch_info):
+        """Create and start the Batch job on the cloud.
+
+        Files used by the batch job will have been prepared and uploaded (by
+        :func:`DockerBase.run_batch`, which is what runs this).
+
+        :param batch_info: A :class:`DockerBatchBase.BatchInfo` containing information about the job
+        """
+        raise NotImplementedError
+
+    def run_batch(self):
+        with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir:
+            tmppath = pathlib.Path(tmpdir)
+            epws_to_copy, batch_info = self._run_batch_prep(tmppath)
+
+            # Copy all the files to cloud storage
+            logger.info("Uploading files for batch...")
+            self.upload_batch_files_to_cloud(tmppath)
+
+            logger.info("Copying duplicate weather files...")
+            self.copy_files_at_cloud(epws_to_copy)
+
+        self.start_batch_job(batch_info)
+
+    def _run_batch_prep(self, tmppath):
+        """Do preparation for running the Batch jobs on the cloud, including producing and uploading
+        files to the cloud that the batch jobs will use.
+
+        This includes:
+            - Weather files (:func:`_prep_weather_files_for_batch`)
+            - Assets :func:`_prep_assets_for_batch`)
+            - Sampling, and splitting the samples into (at most) ``self.batch_array_size`` batches
+              (:func:`_prep_jobs_for_batch`)
+
+        Those functions place their files to be uploaded into ``tmppath``, and then this will upload
+        them to the cloud using (:func:`upload_batch_files_to_cloud`).
+
+        Duplicate weather files will have been excluded from ``tmppath``, and this will use
+        (:func:`copy_files_at_cloud`) to copy those files from-cloud-to-cloud (instead of uploading
+        them).
+
+        ``self.weather_dir`` must exist before calling this method. This is where weather files are
+        stored temporarily.
+
+        This takes ``tmppath`` (rather than managing itself) for testability (so test can manage and
+        inspect the contents of the tmppath).
+
+        :returns: DockerBatchBase.BatchInfo
+        """
+
+        # Weather files
+        logger.info("Prepping weather files...")
+        epws_to_copy = self._prep_weather_files_for_batch(tmppath)
+
+        # Assets
+        self._prep_assets_for_batch(tmppath)
+
+        # Project configuration
+        logger.info("Writing project configuration for upload")
+        with open(tmppath / "config.json", "wt", encoding="utf-8") as f:
+            json.dump(self.cfg, f)
+
+        # Collect simulations to queue
+        batch_info = self._prep_jobs_for_batch(tmppath)
+
+        return (epws_to_copy, batch_info)
+
+    def _prep_weather_files_for_batch(self, tmppath):
         """Downloads, if necessary, and extracts weather files to ``self._weather_dir``.
 
         Because there may be duplicate weather files, this also identifies duplicates to avoid
@@ -161,7 +228,7 @@ class DockerBatchBase(BuildStockBatchBase):
             )
             return epws_to_copy
 
-    def prep_assets_for_batch(self, tmppath):
+    def _prep_assets_for_batch(self, tmppath):
         logger.debug("Creating assets tarfile")
         with tarfile.open(tmppath / "assets.tar.gz", "x:gz") as tar_f:
             project_path = pathlib.Path(self.project_dir)
@@ -178,7 +245,7 @@ class DockerBatchBase(BuildStockBatchBase):
                 "lib/housing_characteristics",
             )
 
-    def prep_jobs_for_batch(self, tmppath):
+    def _prep_jobs_for_batch(self, tmppath):
         # Generate buildstock.csv
         buildstock_csv_filename = self.sampler.run_sampling()
         df = read_csv(buildstock_csv_filename, index_col=0, dtype=str)
@@ -237,55 +304,3 @@ class DockerBatchBase(BuildStockBatchBase):
         shutil.rmtree(jobs_dir)
 
         return DockerBatchBase.BatchInfo(n_sims=n_sims, n_sims_per_job=n_sims_per_job, job_count=job_count)
-
-    def prep_batches(self):
-        """
-        Prepare batches of samples to be uploaded and run in the cloud.
-
-        This will prepare all the files needed by the Batch jobs, including:
-            - Weather files
-            - Assets
-            - Sampling, and splitting the samples into (at most) ``self.batch_array_size`` batches
-
-        It will then upload all of those files, excluding duplicate weather files. It will use
-        ``copy_files_at_cloud`` to copy the duplicate files (instead of uploading them).
-
-        ``self.weather_dir`` must exist before calling this method. This is where weather files are
-        stored temporarily.
-
-        :returns: DockerBatchBase.BatchInfo
-        """
-        with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir:
-            tmppath = pathlib.Path(tmpdir)
-            epws_to_copy, batch_info = self._prep_batch_files(tmppath)
-
-            # Copy all the files to cloud storage
-            logger.info("Uploading files for batch...")
-            self.upload_batch_files_to_cloud(tmppath)
-
-            logger.info("Copying duplicate weather files...")
-            self.copy_files_at_cloud(epws_to_copy)
-
-            return batch_info
-
-    def _prep_batch_files(self, tmppath):
-        """
-        Split out for testability (so test can manage and inspect the contents of the tmppath).
-        """
-
-        # Weather files
-        logger.info("Prepping weather files...")
-        epws_to_copy = self.prep_weather_files_for_batch(tmppath)
-
-        # Assets
-        self.prep_assets_for_batch(tmppath)
-
-        # Project configuration
-        logger.info("Writing project configuration for upload")
-        with open(tmppath / "config.json", "wt", encoding="utf-8") as f:
-            json.dump(self.cfg, f)
-
-        # Collect simulations to queue
-        batch_info = self.prep_jobs_for_batch(tmppath)
-
-        return (epws_to_copy, batch_info)

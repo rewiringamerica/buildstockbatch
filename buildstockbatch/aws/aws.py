@@ -1579,6 +1579,7 @@ class AwsBatch(DockerBatchBase):
         sns_env.clean()
 
     def upload_batch_files_to_cloud(self, tmppath):
+        """Implements :func:`DockerBase.upload_batch_files_to_cloud`"""
         logger.debug("Uploading Batch files to S3")
         upload_directory_to_s3(
             tmppath,
@@ -1587,6 +1588,7 @@ class AwsBatch(DockerBatchBase):
         )
 
     def copy_files_at_cloud(self, files_to_copy):
+        """Implements :func:`DockerBase.copy_files_at_cloud`"""
         logger.debug("Copying weather files on S3")
         bucket = self.cfg["aws"]["s3"]["bucket"]
         Parallel(n_jobs=-1, verbose=9)(
@@ -1599,18 +1601,8 @@ class AwsBatch(DockerBatchBase):
             for src, dest in files_to_copy
         )
 
-    def run_batch(self):
-        """
-        Run a batch of simulations using AWS Batch
-
-        This will
-            - perform the sampling
-            - package and upload the assets, including weather
-            - kick off a batch simulation on AWS
-        """
-        # Prepare batches of work
-        batch_info = self.prep_batches()
-
+    def start_batch_job(self, batch_info):
+        """Implements :func:`DockerBase.start_batch_job`"""
         # Create the output directories
         fs = S3FileSystem()
         for upgrade_id in range(len(self.cfg.get("upgrades", [])) + 1):
