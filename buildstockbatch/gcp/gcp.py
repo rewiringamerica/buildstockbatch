@@ -119,6 +119,27 @@ def delete_job(job_name):
     operation.result()
 
 
+class TsvLogger:
+    """Collects pairs of headers and values, and then outputs to the logger the set of headers on
+    one line and the set of values on another.
+
+    The entries (of the headers and values) are separated by tabs (for easy pasting into a
+    spreadsheet), and may also have spaces for padding so headers and values line up in logging
+    output.
+    """
+
+    headers, values = [], []
+
+    def append_stat(self, header, value):
+        width = max(len(str(header)), len(str(value)))
+        self.headers.append(str(header).rjust(width))
+        self.values.append(str(value).rjust(width))
+
+    def log_stats(self, level):
+        logger.log(level, "\t".join(self.headers))
+        logger.log(level, "\t".join(self.values))
+
+
 class GcpBatch(DockerBatchBase):
     # https://patorjk.com/software/taag/#p=display&f=Santa%20Clara&t=BuildStockBatch%20%20%2F%20GCP
     LOGO = """
@@ -555,27 +576,17 @@ class GcpBatch(DockerBatchBase):
             task_spec = task_group.task_spec
             instance = job_info.status.task_groups["group0"].instances[0]
 
-            # Format stats for easy copying into a spreadsheet
-            keys, values = [], []
-
-            def append_stat(key, value):
-                nonlocal keys
-                nonlocal values
-                width = max(len(str(key)), len(str(value)))
-                keys.append(str(key).rjust(width))
-                values.append(str(value).rjust(width))
-
-            append_stat("Simulations", batch_info.n_sims)
-            append_stat("Tasks", task_group.task_count)
-            append_stat("Parallelism", task_group.parallelism)
-            append_stat("mCPU/task", task_spec.compute_resource.cpu_milli)
-            append_stat("MiB/task", task_spec.compute_resource.memory_mib)
-            append_stat("Machine type", instance.machine_type)
-            append_stat("Provisioning", instance.provisioning_model.name)
-            append_stat("Runtime", job_info.status.run_duration)
-
-            logger.info("\t".join(keys))
-            logger.info("\t".join(values))
+            # Output stats in spreadsheet-friendly format
+            tsv_logger = TsvLogger()
+            tsv_logger.append_stat("Simulations", batch_info.n_sims)
+            tsv_logger.append_stat("Tasks", task_group.task_count)
+            tsv_logger.append_stat("Parallelism", task_group.parallelism)
+            tsv_logger.append_stat("mCPU/task", task_spec.compute_resource.cpu_milli)
+            tsv_logger.append_stat("MiB/task", task_spec.compute_resource.memory_mib)
+            tsv_logger.append_stat("Machine type", instance.machine_type)
+            tsv_logger.append_stat("Provisioning", instance.provisioning_model.name)
+            tsv_logger.append_stat("Runtime", job_info.status.run_duration)
+            tsv_logger.log_stats(logging.INFO)
 
     @classmethod
     def run_task(cls, task_index, job_name, gcs_bucket, gcs_prefix):
@@ -946,33 +957,23 @@ Run this script with --clean to clean up the GCP environment after post-processi
 
         if fail_message is not None:
             # if logged within the tqdm block, the message ends up on the same line as the status
-            logger.warning(f"{fail_message} See {self.postprocessing_job_console_url} for more" " information")
+            logger.warning(f"{fail_message} See {self.postprocessing_job_console_url} for more information")
             return
 
         logger.info(f"🟢 Post-processing finished! ({str(datetime.now() - execution_start_time)}). ")
 
-        # Format stats for easy copying into a spreadsheet
-        keys, values = [], []
-
-        def append_stat(key, value):
-            nonlocal keys
-            nonlocal values
-            width = max(len(str(key)), len(str(value)))
-            keys.append(str(key).rjust(width))
-            values.append(str(value).rjust(width))
-
-        # completion_time might not be set right away
+        # Output stats in spreadsheet-friendly format
+        # completion_time might not be set right away; if not, just use current time (close enough)
         finish_time = execution.completion_time if execution.completion_time is not None else datetime.now()
-
-        append_stat("cpus", cpus)
-        append_stat("memory_mib", memory_mib)
-        append_stat("Succeeded", "Yes")
-        append_stat("Job Created", job.create_time.strftime("%H:%M:%S"))
-        append_stat("Exec Start", execution.start_time.strftime("%H:%M:%S"))
-        append_stat("Script Start", "?")
-        append_stat("Exec Finish", finish_time.strftime("%H:%M:%S"))
-        logger.info("\t".join(keys))
-        logger.info("\t".join(values))
+        tsv_logger = TsvLogger()
+        tsv_logger.append_stat("cpus", cpus)
+        tsv_logger.append_stat("memory_mib", memory_mib)
+        tsv_logger.append_stat("Succeeded", "Yes")
+        tsv_logger.append_stat("Job Created", job.create_time.strftime("%H:%M:%S"))
+        tsv_logger.append_stat("Exec Start", execution.start_time.strftime("%H:%M:%S"))
+        tsv_logger.append_stat("Script Start", "?")
+        tsv_logger.append_stat("Exec Finish", finish_time.strftime("%H:%M:%S"))
+        tsv_logger.log_stats(logging.INFO)
 
     def clean_postprocessing_job(self):
         jobs_client = run_v2.JobsClient()
