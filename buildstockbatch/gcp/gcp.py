@@ -202,6 +202,7 @@ class GcpBatch(DockerBatchBase):
             memory = pp_env.get("memory_mib", GcpBatch.DEFAULT_PP_MEMORY_MIB)
 
             # Allowable values are documented at:
+            # https://cloud.google.com/python/docs/reference/run/latest/google.cloud.run_v2.types.ResourceRequirements
             # https://cloud.google.com/run/docs/configuring/services/cpu
             # https://cloud.google.com/run/docs/configuring/services/memory-limits
             cpus_to_memory_limits = {
