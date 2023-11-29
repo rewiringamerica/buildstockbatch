@@ -99,6 +99,13 @@ class DockerBatchBase(BuildStockBatchBase):
         raise NotImplementedError
 
     def run_batch(self):
+        """Prepare and start a Batch job on the cloud to run simulations.
+
+        This does all the cloud-agnostic prep (such as preparing weather files, assets, and job
+        definition), delegating to the implementations to upload those files to the cloud (using
+        (:func:`upload_batch_files_to_cloud` and :func:`copy_files_at_cloud`), and then calls the
+        implementation's :func:`start_batch_job` to actually create and start the batch job.
+        """
         with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir:
             tmppath = pathlib.Path(tmpdir)
             epws_to_copy, batch_info = self._run_batch_prep(tmppath)
@@ -118,7 +125,7 @@ class DockerBatchBase(BuildStockBatchBase):
 
         This includes:
             - Weather files (:func:`_prep_weather_files_for_batch`)
-            - Assets :func:`_prep_assets_for_batch`)
+            - Assets (:func:`_prep_assets_for_batch`)
             - Sampling, and splitting the samples into (at most) ``self.batch_array_size`` batches
               (:func:`_prep_jobs_for_batch`)
 
