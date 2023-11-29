@@ -19,6 +19,7 @@ import argparse
 import collections
 import csv
 from dask.distributed import Client as DaskClient
+from datetime import datetime
 from fsspec.implementations.local import LocalFileSystem
 from gcsfs import GCSFileSystem
 import gzip
@@ -812,6 +813,8 @@ class GcpBatch(DockerBatchBase):
 
         # Define the Job
         pp_env_cfg = self.cfg["gcp"].get("postprocessing_environment", {})
+        memory_mib = pp_env_cfg.get("memory_mib", 4096)
+        cpus = pp_env_cfg.get("cpus", 2)
         job = run_v2.Job(
             template=run_v2.ExecutionTemplate(
                 template=run_v2.TaskTemplate(
@@ -821,8 +824,8 @@ class GcpBatch(DockerBatchBase):
                             image=self.repository_uri + ":" + self.job_identifier,
                             resources=run_v2.ResourceRequirements(
                                 limits={
-                                    "memory": f"{pp_env_cfg.get('memory_mib', 4096)}Mi",
-                                    "cpu": str(pp_env_cfg.get("cpus", 2)),
+                                    "memory": f"{memory_mib}Mi",
+                                    "cpu": str(cpus),
                                 }
                             ),
                             command=["/bin/sh"],
@@ -858,10 +861,16 @@ class GcpBatch(DockerBatchBase):
             try:
                 jobs_client.run_job(name=self.postprocessing_job_name)
                 logger.info(
-                    "Post-processing Cloud Run job started! "
-                    f"See status at: {self.postprocessing_job_console_url}. "
-                    "You will need to run this script with --clean to clean up the GCP "
-                    "environment after post-processing is complete."
+                    f"""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║ Post-processing Cloud Run Job started!                                       ║
+║                                                                              ║
+║ You may interrupt the script and the job will continue to run.               ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+🔗 See status at: {self.postprocessing_job_console_url}.
+
+Run this script with --clean to clean up the GCP environment after post-processing is complete."""
                 )
                 break
             except:
@@ -884,7 +893,86 @@ class GcpBatch(DockerBatchBase):
                     f"{self.postprocessing_job_console_url}",
                     exc_info=True,
                 )
-                break
+                return
+
+        # Monitor job/execution status, starting by polling the Job for an Execution
+        logger.info("Waiting for execution to begin...")
+        job_start_time = datetime.now()
+        jobs_client = run_v2.JobsClient()
+        job = jobs_client.get_job(name=self.postprocessing_job_name)
+        while not job.latest_created_execution:
+            time.sleep(1)
+            job = jobs_client.get_job(name=self.postprocessing_job_name)
+        execution_start_time = datetime.now()
+        logger.info(
+            f"Execution has started (after {str(execution_start_time - job_start_time)} "
+            "seconds). Waiting for execution to finish..."
+        )
+
+        # Have an execution; poll that for completion
+        fail_message = None
+        with tqdm.tqdm(
+            desc="Waiting for post-processing execution to complete", bar_format="{desc}: {elapsed}{postfix}"
+        ) as pp_tqdm:
+            spinner_states = ["|", "/", "-", "\\"]
+            spinner_state = 0
+
+            pp_tqdm.set_postfix_str("|")
+            executions_client = run_v2.ExecutionsClient()
+            execution_name = f"{self.postprocessing_job_name}/executions/{job.latest_created_execution.name}"
+            last_query_time = time.time()
+            while True:
+                # update spinner frequently...
+                time.sleep(0.25)
+                # ...but only actually query status every 10 sec
+                if time.time() - last_query_time > 10:
+                    # fetch and extract the status
+                    execution = executions_client.get_execution(name=execution_name)
+                    last_query_time = time.time()
+
+                    if execution.succeeded_count > 0:
+                        # Done!
+                        break
+                    elif execution.failed_count > 0:
+                        fail_message = "🟥 Post-processing execution failed."
+                        break
+                    elif execution.cancelled_count > 0:
+                        fail_message = "🟧 Post-processing execution canceled."
+                        break
+
+                spinner_state = (spinner_state + 1) % len(spinner_states)
+                pp_tqdm.set_postfix_str(spinner_states[spinner_state])
+                pp_tqdm.update()
+
+        if fail_message is not None:
+            # if logged within the tqdm block, the message ends up on the same line as the status
+            logger.warning(f"{fail_message} See {self.postprocessing_job_console_url} for more" " information")
+            return
+
+        logger.info(f"🟢 Post-processing finished! ({str(datetime.now() - execution_start_time)}). ")
+
+        # Format stats for easy copying into a spreadsheet
+        keys, values = [], []
+
+        def append_stat(key, value):
+            nonlocal keys
+            nonlocal values
+            width = max(len(str(key)), len(str(value)))
+            keys.append(str(key).rjust(width))
+            values.append(str(value).rjust(width))
+
+        # completion_time might not be set right away
+        finish_time = execution.completion_time if execution.completion_time is not None else datetime.now()
+
+        append_stat("cpus", cpus)
+        append_stat("memory_mib", memory_mib)
+        append_stat("Succeeded", "Yes")
+        append_stat("Job Created", job.create_time.strftime("%H:%M:%S"))
+        append_stat("Exec Start", execution.start_time.strftime("%H:%M:%S"))
+        append_stat("Script Start", "?")
+        append_stat("Exec Finish", finish_time.strftime("%H:%M:%S"))
+        logger.info("\t".join(keys))
+        logger.info("\t".join(values))
 
     def clean_postprocessing_job(self):
         jobs_client = run_v2.JobsClient()
