@@ -134,6 +134,9 @@ class GcpBatch(DockerBatchBase):
     /___/(_/_(_(/_(_/_(___)(__(_)(__/ |_/___/(_/(_(__(__/ /_    /     (___/(___/  /
       Executing BuildStock projects with grace since 2018
 """
+    # Default post-processing resources
+    DEFAULT_PP_CPUS = 2
+    DEFAULT_PP_MEMORY_MIB = 4096
 
     def __init__(self, project_filename, job_identifier=None):
         """
@@ -192,13 +195,37 @@ class GcpBatch(DockerBatchBase):
                 f"Artifact Registry repository {repo} does not exist in project {gcp_project} and region {region}"
             )
 
+        # Check post-processing resources
+        pp_env = cfg["gcp"].get("postprocessing_environment")
+        if pp_env:
+            cpus = pp_env.get("cpus", GcpBatch.DEFAULT_PP_CPUS)
+            memory = pp_env.get("memory_mib", GcpBatch.DEFAULT_PP_MEMORY_MIB)
+
+            # Allowable values are documented at:
+            # https://cloud.google.com/run/docs/configuring/services/cpu
+            # https://cloud.google.com/run/docs/configuring/services/memory-limits
+            cpus_to_memory_limits = {
+                1: (512, 4096),
+                2: (512, 8192),
+                4: (2048, 16384),
+                8: (4096, 327681),
+            }
+
+            assert cpus in cpus_to_memory_limits, "gcp.postprocessing_environment.cpus must be 1, 2, 4 or 8"
+            min_memory, max_memory = cpus_to_memory_limits[cpus]
+            assert min_memory <= memory, (
+                f"gcp.postprocessing_environment.memory_mib must be at least {min_memory} for {cpus} CPUs. "
+                f"(Found {memory})"
+            )
+            assert memory <= max_memory, (
+                f"gcp.postprocessing_environment.memory_mib must be less than or equal to {max_memory} for {cpus} CPUs "
+                f"(Found {memory})"
+            )
+
     @staticmethod
     def validate_project(project_file):
         super(GcpBatch, GcpBatch).validate_project(project_file)
         GcpBatch.validate_gcp_args(project_file)
-        logger.warning("TODO: validate_project() not completely implemented, yet!")
-        return  # todo-xxx- to be (re)implemented
-        GcpBatch.validate_dask_settings(project_file)
 
     @property
     def docker_image(self):
@@ -942,8 +969,8 @@ class GcpBatch(DockerBatchBase):
                             image=self.repository_uri + ":" + self.job_identifier,
                             resources=run_v2.ResourceRequirements(
                                 limits={
-                                    "memory": f"{pp_env_cfg.get('memory_mib', 4096)}Mi",
-                                    "cpu": str(pp_env_cfg.get("cpus", 2)),
+                                    "memory": f"{pp_env_cfg.get('memory_mib', self.DEFAULT_PP_MEMORY_MIB)}Mi",
+                                    "cpu": str(pp_env_cfg.get("cpus", self.DEFAULT_PP_CPUS)),
                                 }
                             ),
                             command=["/bin/sh"],
