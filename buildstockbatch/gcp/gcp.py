@@ -381,8 +381,28 @@ class GcpBatch(DockerBatchBase):
     def clean(self):
         delete_job(self.gcp_batch_job_name)
         self.clean_postprocessing_job()
-        # TODO: Delete Docker image
-        # TODO: Prune local docker images
+
+        # Clean up images in Artifact Registry
+        ar_client = artifactregistry_v1.ArtifactRegistryClient()
+        repository = f"projects/{self.gcp_project}/locations/{self.region}/repositories/{self.ar_repo}"
+        package = f"{repository}/packages/buildstockbatch"
+        # Delete the tag used by this job
+        try:
+            ar_client.delete_tag(name=f"{package}/tags/{self.job_identifier}")
+        except exceptions.NotFound:
+            pass
+
+        # Then delete all untagged versions
+        all_versions = ar_client.list_versions(
+            artifactregistry_v1.ListVersionsRequest(parent=package, view=artifactregistry_v1.VersionView.FULL)
+        )
+        deleted = 0
+        for version in all_versions:
+            if not version.related_tags:
+                logger.debug(f"Deleting image {version.name}")
+                ar_client.delete_version(name=version.name)
+                deleted += 1
+        logger.info(f"Cleaned up {deleted} old docker images")
 
     def show_jobs(self):
         """

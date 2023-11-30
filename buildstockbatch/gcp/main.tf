@@ -56,7 +56,17 @@ resource "google_storage_bucket" "bucket" {
 
 # Artifact registry repository
 resource "google_artifact_registry_repository" "AR_repo" {
+  provider      = google-beta
   location      = var.region
   repository_id = var.artifact_registry_repository
   format        = "DOCKER"
+  cleanup_policy_dry_run = false
+  cleanup_policies {
+    id     = "delete-old-images"
+    action = "DELETE"
+    condition {
+      tag_state    = "ANY"
+      older_than   = "2592000s"  # 30 days
+    }
+  }
 }
