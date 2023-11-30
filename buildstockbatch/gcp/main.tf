@@ -46,6 +46,11 @@ provider "google" {
   region  = var.region
 }
 
+provider "google-beta" {
+  project = var.gcp_project
+  region  = var.region
+}
+
 # GCS bucket for storing inputs and outputs
 resource "google_storage_bucket" "bucket" {
   name                        = var.bucket_name
