@@ -203,24 +203,22 @@ class GcpBatch(DockerBatchBase):
 
             # Allowable values are documented at:
             # https://cloud.google.com/python/docs/reference/run/latest/google.cloud.run_v2.types.ResourceRequirements
-            # https://cloud.google.com/run/docs/configuring/services/cpu
-            # https://cloud.google.com/run/docs/configuring/services/memory-limits
             cpus_to_memory_limits = {
                 1: (512, 4096),
                 2: (512, 8192),
                 4: (2048, 16384),
-                8: (4096, 327681),
+                8: (4096, 32768),
             }
 
-            assert cpus in cpus_to_memory_limits, "gcp.postprocessing_environment.cpus must be 1, 2, 4 or 8"
+            assert cpus in cpus_to_memory_limits, "gcp.postprocessing_environment.cpus must be 1, 2, 4 or 8."
             min_memory, max_memory = cpus_to_memory_limits[cpus]
-            assert min_memory <= memory, (
+            assert memory >= min_memory, (
                 f"gcp.postprocessing_environment.memory_mib must be at least {min_memory} for {cpus} CPUs. "
-                f"(Found {memory})"
+                f"(Found {memory}) See https://cloud.google.com/run/docs/configuring/services/cpu"
             )
             assert memory <= max_memory, (
                 f"gcp.postprocessing_environment.memory_mib must be less than or equal to {max_memory} for {cpus} CPUs "
-                f"(Found {memory})"
+                f"(Found {memory}) See https://cloud.google.com/run/docs/configuring/services/memory-limits"
             )
 
     @staticmethod
