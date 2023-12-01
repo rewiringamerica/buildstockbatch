@@ -160,6 +160,11 @@ class GcpBatch(DockerBatchBase):
         self.batch_array_size = self.cfg["gcp"]["batch_array_size"]
 
     @staticmethod
+    def get_AR_repo_name(gcp_project, region, repo):
+        """Returns the full name of a repository in Artifact Registry."""
+        return f"projects/{gcp_project}/locations/{region}/repositories/{repo}"
+
+    @staticmethod
     def validate_gcp_args(project_file):
         cfg = get_project_configuration(project_file)
         assert "gcp" in cfg, 'Project config must contain a "gcp" section'
@@ -184,7 +189,7 @@ class GcpBatch(DockerBatchBase):
         # Check that artifact registry repository exists
         repo = cfg["gcp"]["artifact_registry"]["repository"]
         ar_client = artifactregistry_v1.ArtifactRegistryClient()
-        repo_name = f"projects/{gcp_project}/locations/{region}/repositories/{repo}"
+        repo_name = GcpBatch.get_AR_repo_name(gcp_project, region, repo)
         try:
             ar_client.get_repository(name=repo_name)
         except exceptions.NotFound:
@@ -384,13 +389,13 @@ class GcpBatch(DockerBatchBase):
 
         # Clean up images in Artifact Registry
         ar_client = artifactregistry_v1.ArtifactRegistryClient()
-        repository = f"projects/{self.gcp_project}/locations/{self.region}/repositories/{self.ar_repo}"
-        package = f"{repository}/packages/buildstockbatch"
+        repo_name = self.get_AR_repo_name(self.gcp_project, self.region, self.ar_repo)
+        package = f"{repo_name}/packages/buildstockbatch"
         # Delete the tag used by this job
         try:
             ar_client.delete_tag(name=f"{package}/tags/{self.job_identifier}")
         except exceptions.NotFound:
-            pass
+            logger.debug(f"No `{self.job_identifier}` tag found in Aritfact Registry")
 
         # Then delete all untagged versions
         all_versions = ar_client.list_versions(
