@@ -9,12 +9,14 @@ import tempfile
 from unittest.mock import MagicMock, PropertyMock
 
 from buildstockbatch.cloud.docker_base import DockerBatchBase
+from buildstockbatch.test.shared_testing_stuff import docker_available
 from buildstockbatch.utils import get_project_configuration
 
 here = os.path.dirname(os.path.abspath(__file__))
 resources_dir = os.path.join(here, "test_inputs", "test_openstudio_buildstock", "resources")
 
 
+@docker_available
 def test_prep_batches(basic_residential_project_file, mocker):
     """Test that samples are created and bundled into batches correctly."""
     project_filename, results_dir = basic_residential_project_file()
