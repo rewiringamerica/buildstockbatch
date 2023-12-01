@@ -29,8 +29,8 @@ import time
 import io
 import zipfile
 
-from buildstockbatch.base import ValidationError
 from buildstockbatch.aws.awsbase import AwsJobBase
+from buildstockbatch.base import ValidationError
 from buildstockbatch.cloud.docker_base import DockerBatchBase
 from buildstockbatch.utils import log_error_details, get_project_configuration
 
