@@ -456,9 +456,8 @@ class GcpBatch(DockerBatchBase):
         Show the existing GCP Batch and Cloud Run jobs that match the provided project, if they exist.
         """
         # GCP Batch job that runs the simulations
-        client = batch_v1.BatchServiceClient()
-        try:
-            job = client.get_job(batch_v1.GetJobRequest(name=self.gcp_batch_job_name))
+        job = self.get_existing_batch_job()
+        if job:
             logger.info("Batch job")
             logger.info(f"  Name: {job.name}")
             logger.info(f"  UID: {job.uid}")
@@ -469,7 +468,7 @@ class GcpBatch(DockerBatchBase):
                     task_counts[status] += count
             logger.info(f"  Task statuses: {dict(task_counts)}")
             logger.debug(f"Full job info:\n{job}")
-        except exceptions.NotFound:
+        else:
             logger.info(f"No existing Batch jobs match: {self.gcp_batch_job_name}")
         logger.info(f"See all Batch jobs at https://console.cloud.google.com/batch/jobs?project={self.gcp_project}")
 
