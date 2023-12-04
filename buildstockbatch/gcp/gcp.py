@@ -1178,9 +1178,11 @@ def main():
         elif args.crawl:
             batch.process_results(skip_combine=True, use_dask_cluster=False)
         else:
-            if batch.get_existing_batch_job():
+            existing_job = batch.get_existing_batch_job()
+            if existing_job:
+                job_status = existing_job.status.state.name
                 logger.error(
-                    f"A job with this ID ({batch.job_identifier}) already exists. "
+                    f"A job with this ID ({batch.job_identifier}) already exists (status: {job_status}). "
                     "Choose a new job_identifier or run with --clean to delete the existing job."
                 )
                 return
