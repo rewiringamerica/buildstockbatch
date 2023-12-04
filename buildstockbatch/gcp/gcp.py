@@ -420,6 +420,14 @@ class GcpBatch(DockerBatchBase):
             logger.info(f"No existing Cloud Run jobs match {self.postprocessing_job_name}")
         logger.info(f"See all Cloud Run jobs at https://console.cloud.google.com/run/jobs?project={self.gcp_project}")
 
+    def get_existing_batch_job(self):
+        client = batch_v1.BatchServiceClient()
+        try:
+            job = client.get_job(batch_v1.GetJobRequest(name=self.gcp_batch_job_name))
+            return job
+        except exceptions.NotFound:
+            return None
+
     def run_batch(self):
         """
         Start the GCP Batch job to run all the building simulations.
@@ -1170,8 +1178,13 @@ def main():
         elif args.crawl:
             batch.process_results(skip_combine=True, use_dask_cluster=False)
         else:
-            # TODO: check whether this job ID already exists. If so, don't try to start a new job, and maybe reattach
-            # to the existing one if it's still running.
+            if batch.get_existing_batch_job():
+                logger.error(
+                    f"A job with this ID ({batch.job_identifier}) already exists. "
+                    "Choose a new job_identifier or run with --clean to delete the existing job."
+                )
+                return
+
             batch.build_image()
             batch.push_image()
             batch.run_batch()
