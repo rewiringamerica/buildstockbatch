@@ -245,6 +245,8 @@ on the `GCP Batch <https://cloud.google.com/batch>`_ service.
    differentiate it from other jobs.
 *  ``project``: The GCP Project ID in which the batch will be run and of the Artifact Registry
    (where Docker images are stored).
+*  ``service_account``: The service account to use when running jobs on GCP.
+    Default: the Compute Engine default service account of the GCP project.
 *  ``gcs``: Configuration for project data storage on GCP Cloud Storage.
 
     *  ``bucket``: The Cloud Storage bucket this project will use for simulation output and
@@ -270,6 +272,7 @@ on the `GCP Batch <https://cloud.google.com/batch>`_ service.
     *  ``use_spot``: true or false. Defaults to false if missing. This tells the project
        to use `Spot VMs <https://cloud.google.com/spot-vms>`_ for data
        simulations, which can reduce costs by up to 91%.
+
 *  ``postprocessing_environment``: Optional. Specifies the Cloud Run computing environment for
    postprocessing.
 
