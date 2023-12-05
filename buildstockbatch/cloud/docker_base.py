@@ -154,11 +154,14 @@ class DockerBatchBase(BuildStockBatchBase):
         with open(tmppath / "config.json", "wt", encoding="utf-8") as f:
             json.dump(self.cfg, f)
 
+        # Run sampling - generages buildstock.csv
+        buildstock_csv_filename = self.sampler.run_sampling()
+
         # Collect simulations to queue
-        batch_info = self._prep_jobs_for_batch(tmppath)
+        batch_info = self._prep_jobs_for_batch(tmppath, buildstock_csv_filename)
 
         # Assets
-        self._prep_assets_for_batch(tmppath)
+        self._prep_assets_for_batch(tmppath, buildstock_csv_filename)
 
         return (epws_to_copy, batch_info)
 
@@ -235,7 +238,13 @@ class DockerBatchBase(BuildStockBatchBase):
             )
             return epws_to_copy
 
-    def _prep_assets_for_batch(self, tmppath):
+    def _prep_assets_for_batch(self, tmppath, buildstock_csv_filename):
+        """Bundles together the assets used when running simulations, and stores them to tmppath/assets.tar.gz.
+
+        Note: This function should be called after sampling is run. If buildstock.csv is missing, it will fail.
+        """
+        assert os.path.exists(buildstock_csv_filename), f"buildstock.csv does not exist at: {buildstock_csv_filename}"
+
         logger.debug("Creating assets tarfile")
         with tarfile.open(tmppath / "assets.tar.gz", "x:gz") as tar_f:
             project_path = pathlib.Path(self.project_dir)
@@ -252,9 +261,7 @@ class DockerBatchBase(BuildStockBatchBase):
                 "lib/housing_characteristics",
             )
 
-    def _prep_jobs_for_batch(self, tmppath):
-        # Generate buildstock.csv
-        buildstock_csv_filename = self.sampler.run_sampling()
+    def _prep_jobs_for_batch(self, tmppath, buildstock_csv_filename):
         df = read_csv(buildstock_csv_filename, index_col=0, dtype=str)
         self.validate_buildstock_csv(self.project_filename, df)
         building_ids = df.index.tolist()
