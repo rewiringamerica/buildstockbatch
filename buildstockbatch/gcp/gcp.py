@@ -506,23 +506,21 @@ class GcpBatch(DockerBatchBase):
     def check_for_existing_jobs(self, pp_only=False):
         """If there are existing jobs with the same ID as this job, logs them as errors and returns True.
 
-        Otherwise, returns False.
+        Checks for both the Batch job and Cloud Run post-processing job.
 
         :param pp_only: If true, only check for the post-processing job.
         """
         if pp_only:
             existing_batch_job = None
-        else:
-            if existing_batch_job := self.get_existing_batch_job():
-                logger.error(
-                    f"A Batch job with this ID ({self.job_identifier}) already exists "
-                    f"(status: {existing_batch_job.status.state.name}). Choose a new job_identifier or run with "
-                    "--clean to delete the existing job."
-                )
+        elif existing_batch_job := self.get_existing_batch_job():
+            logger.error(
+                f"A Batch job with this ID ({self.job_identifier}) already exists "
+                f"(status: {existing_batch_job.status.state.name}). Choose a new job_identifier or run with "
+                "--clean to delete the existing job."
+            )
+
         if existing_pp_job := self.get_existing_postprocessing_job():
-            status = "Running"
-            if existing_pp_job.latest_created_execution.completion_time:
-                status = "Completed"
+            status = "Completed" if existing_pp_job.latest_created_execution.completion_time else "Running"
             logger.error(
                 f"A Cloud Run job with this ID ({self.postprocessing_job_id}) already exists "
                 f"(status: {status}). Choose a new job_identifier or run with --clean "
