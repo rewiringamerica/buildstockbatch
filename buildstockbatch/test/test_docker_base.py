@@ -97,8 +97,8 @@ def test_get_epws_to_download():
             ],
         }
 
-        epws = DockerBatchBase.get_epws_to_download(sim_dir, jobs_d)
-        assert epws == set(["weather/G0100970.epw", "weather/G0100830.epw"])
+        epws = DockerBatchBase.determine_epws_needed_for_job(sim_dir, jobs_d)
+        assert epws == {"weather/G2500210.epw", "weather/G2601390.epw"}
 
 
 def test_run_simulations(basic_residential_project_file):
