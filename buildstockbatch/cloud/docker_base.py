@@ -149,10 +149,6 @@ class DockerBatchBase(BuildStockBatchBase):
         :returns: DockerBatchBase.BatchInfo
         """
 
-        # Weather files
-        logger.info("Prepping weather files...")
-        epws_to_copy = self._prep_weather_files_for_batch(tmppath)
-
         # Project configuration
         logger.info("Writing project configuration for upload")
         with open(tmppath / "config.json", "wt", encoding="utf-8") as f:
@@ -160,6 +156,10 @@ class DockerBatchBase(BuildStockBatchBase):
 
         # Collect simulations to queue
         batch_info = self._prep_jobs_for_batch(tmppath)
+
+        # Weather files
+        logger.info("Prepping weather files...")
+        epws_to_copy = self._prep_weather_files_for_batch(tmppath)
 
         return (epws_to_copy, batch_info)
 
