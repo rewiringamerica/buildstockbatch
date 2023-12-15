@@ -283,7 +283,10 @@ on the `GCP Batch <https://cloud.google.com/batch>`_ service.
     *  ``prefix``: The Cloud Storage prefix at which the data will be stored.
 
 *  ``region``: The GCP region in which the batch will be run and of the Artifact Registry.
-*  ``batch_array_size``: Number of concurrent simulations to run. Max: 10000.
+*  ``batch_array_size``: Number of tasks to divide the simulations into. Max: 10000.
+*  ``parallelism``: Optional. Maximum number of tasks that can run in parallel. If not specified,
+   uses `GCP's default behavior`_ ("Default to ``min(task_count, parallel tasks per job limit)``").
+   Parallelism is also limited to GCP vCPU and other quotas.
 *  ``artifact_registry``: Configuration for Docker image storage in GCP Artifact Registry
 
     *  ``repository``: The name of the GCP Artifact Repository in which Docker images are stored.
@@ -308,6 +311,7 @@ on the `GCP Batch <https://cloud.google.com/batch>`_ service.
     *  ``memory_mib``: `Amount of RAM`_ needed in MiB. 2048 MiB per CPU is recommended. Default:
        4096.
 
+.. _GCP's default behavior: https://cloud.google.com/python/docs/reference/batch/latest/google.cloud.batch_v1.types.TaskGroup
 .. _Number of CPUs: https://cloud.google.com/run/docs/configuring/services/cpu
 .. _Amount of RAM: https://cloud.google.com/run/docs/configuring/services/memory-limits
 
