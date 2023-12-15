@@ -20,6 +20,7 @@ import json
 import logging
 import math
 import os
+import pandas as pd
 import pathlib
 import random
 import shutil
@@ -461,3 +462,38 @@ class DockerBatchBase(BuildStockBatchBase):
                 shutil.rmtree(item)
             elif os.path.isfile(item):
                 os.remove(item)
+
+    def log_summary(self):
+        """
+        Log a summary of how many simulations succeeded, failed, or ended with other statuses.
+
+        Uses the `completed_status` column of the files in results_csvs/results_*.csv.gz.
+        """
+        fs = self.get_fs()
+        # Summary of simulation statuses across all upgrades
+        status_summary = {}
+        all_statuses = set()
+
+        for result in fs.ls(f"{self.results_dir}/results_csvs/"):
+            upgrade_id = result.split(".")[0][-2:]
+            with fs.open(result) as f:
+                with gzip.open(f) as gf:
+                    df = pd.read_csv(gf)
+            # Dict mapping from status (e.g. "Success") to count
+            statuses = df.groupby("completed_status").size().to_dict()
+            status_summary[upgrade_id] = statuses
+            all_statuses.update(statuses.keys())
+
+        # Always include these statuses and show them first
+        always_use = ["Success", "Fail"]
+        all_statuses = always_use + list(all_statuses - set(always_use))
+        s = "Final status of all simulations:"
+        for upgrade, counts in status_summary.items():
+            if upgrade == "00":
+                s += "\nBaseline     "
+            else:
+                s += f"\nUpgrade {upgrade}   "
+            for status in all_statuses:
+                s += f"{status}: {counts.get(status, 0):<6d} "
+
+        logger.info(s)

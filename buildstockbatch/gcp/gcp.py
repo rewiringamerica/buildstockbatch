@@ -781,6 +781,7 @@ class GcpBatch(DockerBatchBase):
 
         if not skip_combine:
             self.start_combine_results_job_on_cloud(self.results_dir, do_timeseries=do_timeseries)
+        self.log_summary()
 
     @classmethod
     def run_combine_results_on_cloud(cls, gcs_bucket, gcs_prefix, results_dir, do_timeseries):
