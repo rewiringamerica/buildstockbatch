@@ -8,6 +8,7 @@ import tarfile
 import tempfile
 from unittest.mock import MagicMock, PropertyMock
 
+from buildstockbatch.cloud import docker_base
 from buildstockbatch.cloud.docker_base import DockerBatchBase
 from buildstockbatch.test.shared_testing_stuff import docker_available
 from buildstockbatch.utils import get_project_configuration
@@ -97,7 +98,7 @@ def test_get_epws_to_download():
             ],
         }
 
-        epws = DockerBatchBase.determine_epws_needed_for_job(sim_dir, jobs_d)
+        epws = docker_base.determine_epws_needed_for_job(sim_dir, jobs_d)
         assert epws == {"weather/G2500210.epw", "weather/G2601390.epw"}
 
 

@@ -36,6 +36,55 @@ from buildstockbatch.utils import ContainerRuntime, calc_hash_for_file, compress
 logger = logging.getLogger(__name__)
 
 
+def determine_epws_needed_for_job(sim_dir, jobs_d):
+    """
+    Gets the list of filenames for the weather data required for a job of simulations.
+
+    :param sim_dir: Path to the directory where job files are stored
+    :param jobs_d: Contents of a single job JSON file; contains the list of buildings to simulate in this job.
+
+    :returns: Set of epw filenames needed for this job of simulations.
+    """
+    # Fetch the mapping for building to weather file from options_lookup.tsv
+    epws_by_option, param_name = _epws_by_option(sim_dir / "lib" / "resources" / "options_lookup.tsv")
+
+    # Look through the buildstock.csv to find the appropriate location and epw
+    epws_to_download = set()
+    building_ids = [x[0] for x in jobs_d["batch"]]
+    with open(
+        sim_dir / "lib" / "housing_characteristics" / "buildstock.csv",
+        "r",
+        encoding="utf-8",
+    ) as f:
+        csv_reader = csv.DictReader(f)
+        for row in csv_reader:
+            if int(row["Building"]) in building_ids:
+                epws_to_download.add(epws_by_option[row[param_name]])
+
+    return epws_to_download
+
+
+def _epws_by_option(options_lookup_path):
+    epws_by_option = {}
+    with open(options_lookup_path, "r", encoding="utf-8") as f:
+        tsv_reader = csv.reader(f, delimiter="\t")
+        next(tsv_reader)  # skip headers
+        param_name = None
+        for row in tsv_reader:
+            row_has_epw = [x.endswith(".epw") for x in row[2:]]
+            if sum(row_has_epw):
+                if row[0] != param_name and param_name is not None:
+                    raise RuntimeError(
+                        "The epw files are specified in options_lookup.tsv under more than one parameter "
+                        f"type: {param_name}, {row[0]}"
+                    )  # noqa: E501
+                epw_filename = row[row_has_epw.index(True) + 2].split("=")[1]
+                param_name = row[0]
+                option_name = row[1]
+                epws_by_option[option_name] = epw_filename
+    return (epws_by_option, param_name)
+
+
 class DockerBatchBase(BuildStockBatchBase):
     """Base class for implementations that run in Docker containers."""
 
@@ -350,7 +399,7 @@ class DockerBatchBase(BuildStockBatchBase):
         :returns: Set of EPW filenames needed for this batch of simulations.
         """
         # Fetch the mapping for building to weather file from options_lookup.tsv
-        epws_by_option, param_name = DockerBatchBase.epws_by_option(
+        epws_by_option, param_name = _epws_by_option(
             pathlib.Path(self.buildstock_dir) / "resources" / "options_lookup.tsv"
         )
 
@@ -371,57 +420,6 @@ class DockerBatchBase(BuildStockBatchBase):
 
         logger.debug(f"Unique EPWs needed for this buildstock: {len(epws_needed):,}")
         return epws_needed
-
-    @staticmethod
-    def determine_epws_needed_for_job(sim_dir, jobs_d):
-        """
-        Gets the list of filenames for the weather data required for a job of simulations.
-
-        :param sim_dir: Path to the directory where job files are stored
-        :param jobs_d: Contents of a single job JSON file; contains the list of buildings to simulate in this job.
-
-        :returns: Set of epw filenames needed for this job of simulations.
-        """
-        # Fetch the mapping for building to weather file from options_lookup.tsv
-        epws_by_option, param_name = DockerBatchBase.epws_by_option(
-            sim_dir / "lib" / "resources" / "options_lookup.tsv"
-        )
-
-        # Look through the buildstock.csv to find the appropriate location and epw
-        epws_to_download = set()
-        building_ids = [x[0] for x in jobs_d["batch"]]
-        with open(
-            sim_dir / "lib" / "housing_characteristics" / "buildstock.csv",
-            "r",
-            encoding="utf-8",
-        ) as f:
-            csv_reader = csv.DictReader(f)
-            for row in csv_reader:
-                if int(row["Building"]) in building_ids:
-                    epws_to_download.add(epws_by_option[row[param_name]])
-
-        return epws_to_download
-
-    @staticmethod
-    def epws_by_option(options_lookup_path):
-        epws_by_option = {}
-        with open(options_lookup_path, "r", encoding="utf-8") as f:
-            tsv_reader = csv.reader(f, delimiter="\t")
-            next(tsv_reader)  # skip headers
-            param_name = None
-            for row in tsv_reader:
-                row_has_epw = [x.endswith(".epw") for x in row[2:]]
-                if sum(row_has_epw):
-                    if row[0] != param_name and param_name is not None:
-                        raise RuntimeError(
-                            "The epw files are specified in options_lookup.tsv under more than one parameter "
-                            f"type: {param_name}, {row[0]}"
-                        )  # noqa: E501
-                    epw_filename = row[row_has_epw.index(True) + 2].split("=")[1]
-                    param_name = row[0]
-                    option_name = row[1]
-                    epws_by_option[option_name] = epw_filename
-        return (epws_by_option, param_name)
 
     @classmethod
     def run_simulations(cls, cfg, job_id, jobs_d, sim_dir, fs, output_path):
