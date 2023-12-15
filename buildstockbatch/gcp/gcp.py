@@ -658,6 +658,7 @@ class GcpBatch(DockerBatchBase):
                 progress_bar.set_postfix_str(f"{dict(task_counts)}")
 
         logger.info(f"Batch job status: {job_status}")
+        logger.info(f"Batch job tasks: {dict(task_counts)}")
         if job_status != "SUCCEEDED":
             raise RuntimeError(f"Batch job failed. See GCP logs at {job_url}")
         else:
