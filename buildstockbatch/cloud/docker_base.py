@@ -502,4 +502,8 @@ class DockerBatchBase(BuildStockBatchBase):
                 s += f"\nUpgrade {upgrade}   "
             for status in all_statuses:
                 s += f"{status}: {counts.get(status, 0):<7d}  "
+
+        for upgrade in postprocessing.get_upgrade_list(self.cfg):
+            if f"{upgrade:02d}" not in status_summary:
+                s += f"\nNo results found for Upgrade {upgrade}"
         logger.info(s)
