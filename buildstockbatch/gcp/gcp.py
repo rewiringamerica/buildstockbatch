@@ -41,6 +41,7 @@ from google.cloud import compute_v1
 from google.cloud import run_v2
 
 from buildstockbatch import postprocessing
+from buildstockbatch.cloud import docker_base
 from buildstockbatch.cloud.docker_base import DockerBatchBase
 from buildstockbatch.exc import ValidationError
 from buildstockbatch.utils import (
@@ -594,6 +595,7 @@ class GcpBatch(DockerBatchBase):
         # How many of these tasks to run.
         group = batch_v1.TaskGroup(
             task_count=batch_info.job_count,
+            parallelism=gcp_cfg.get("parallelism", None),
             task_spec=task,
         )
 
@@ -618,6 +620,9 @@ class GcpBatch(DockerBatchBase):
         job.allocation_policy = allocation_policy
         job.logs_policy = batch_v1.LogsPolicy()
         job.logs_policy.destination = batch_v1.LogsPolicy.Destination.CLOUD_LOGGING
+        job.labels = {
+            "bsb_job_identifier": self.job_identifier,
+        }
 
         create_request = batch_v1.CreateJobRequest()
         create_request.job = job
@@ -635,12 +640,16 @@ class GcpBatch(DockerBatchBase):
             "https://console.cloud.google.com/batch/jobsDetail/regions/"
             f"{self.region}/jobs/{self.job_identifier}/details?project={self.gcp_project}"
         )
+        logger.info(
+            "Simulation output browser (Cloud Console): "
+            f"https://console.cloud.google.com/storage/browser/{self.gcs_bucket}/{self.gcs_prefix}/results/simulation_output"
+        )
         logger.info(f"View GCP Batch job at {job_url}")
 
         # Monitor job status while waiting for the job to complete
         n_completed_last_time = 0
         client = batch_v1.BatchServiceClient()
-        with tqdm.tqdm(desc="Running Simulations", total=batch_info.job_count, unit="batch") as progress_bar:
+        with tqdm.tqdm(desc="Running Simulations", total=batch_info.job_count, unit="task") as progress_bar:
             job_status = None
             while job_status not in ("SUCCEEDED", "FAILED", "DELETION_IN_PROGRESS"):
                 time.sleep(10)
@@ -721,7 +730,7 @@ class GcpBatch(DockerBatchBase):
         weather_dir = sim_dir / "weather"
         os.makedirs(weather_dir, exist_ok=True)
 
-        epws_to_download = cls.get_epws_to_download(sim_dir, jobs_d)
+        epws_to_download = docker_base.determine_epws_needed_for_job(sim_dir, jobs_d)
 
         # Download and unzip the epws needed for these simulations
         for epw_filename in epws_to_download:
@@ -839,7 +848,10 @@ class GcpBatch(DockerBatchBase):
                     max_retries=0,
                     service_account=self.cfg["gcp"].get("service_account"),
                 )
-            )
+            ),
+            labels={
+                "bsb_job_identifier": self.job_identifier,
+            },
         )
 
         # Create the job
@@ -866,6 +878,7 @@ class GcpBatch(DockerBatchBase):
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 🔗 See status at: {self.postprocessing_job_console_url}.
+Results output browser (Cloud Console): https://console.cloud.google.com/storage/browser/{self.gcs_bucket}/{self.gcs_prefix}/results/
 
 Run this script with --clean to clean up the GCP environment after post-processing is complete."""
                 )
