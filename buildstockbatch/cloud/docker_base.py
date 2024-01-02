@@ -472,7 +472,7 @@ class DockerBatchBase(BuildStockBatchBase):
         fs = self.get_fs()
         # Summary of simulation statuses across all upgrades
         status_summary = {}
-        all_statuses = set()
+        total_counts = collections.defaultdict(int)
 
         results_csv_dir = f"{self.results_dir}/results_csvs/"
         try:
@@ -489,11 +489,12 @@ class DockerBatchBase(BuildStockBatchBase):
             # Dict mapping from status (e.g. "Success") to count
             statuses = df.groupby("completed_status").size().to_dict()
             status_summary[upgrade_id] = statuses
-            all_statuses.update(statuses.keys())
+            for status, count in statuses.items():
+                total_counts[status] += count
 
         # Always include these statuses and show them first
         always_use = ["Success", "Fail"]
-        all_statuses = always_use + list(all_statuses - set(always_use))
+        all_statuses = always_use + list(total_counts.keys() - set(always_use))
         s = "Final status of all simulations:"
         for upgrade, counts in status_summary.items():
             if upgrade == "00":
@@ -502,6 +503,11 @@ class DockerBatchBase(BuildStockBatchBase):
                 s += f"\nUpgrade {upgrade}   "
             for status in all_statuses:
                 s += f"{status}: {counts.get(status, 0):<7d}  "
+
+        s += "\n\nTotal        "
+        for status in all_statuses:
+            s += f"{status}: {total_counts.get(status, 0):<7d}  "
+        s += "\n"
 
         for upgrade in postprocessing.get_upgrade_list(self.cfg):
             if f"{upgrade:02d}" not in status_summary:
