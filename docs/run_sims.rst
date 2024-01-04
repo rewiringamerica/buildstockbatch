@@ -129,7 +129,7 @@ especially over a slower internet connection as it is downloading and building a
 GCP Specific Project configuration
 ..................................
 
-For the project to run on GCP, you will need to add a `gcp` section to your config
+For the project to run on GCP, you will need to add a ``gcp`` section to your config
 file, something like this:
 
 .. code-block:: yaml
