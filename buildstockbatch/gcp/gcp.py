@@ -17,25 +17,19 @@ that's likely to be refactored out will be commented with 'todo: aws-shared'.
 """
 import argparse
 import collections
-import csv
 from dask.distributed import Client as DaskClient
-from fsspec.implementations.local import LocalFileSystem
+from datetime import datetime
 from gcsfs import GCSFileSystem
 import gzip
 from joblib import Parallel, delayed
 import json
 import io
-import itertools
 import logging
-import math
 import os
 import pathlib
-import random
 import re
 import shutil
-import subprocess
 import tarfile
-import tempfile
 import time
 import tqdm
 
@@ -47,14 +41,12 @@ from google.cloud import compute_v1
 from google.cloud import run_v2
 
 from buildstockbatch import postprocessing
+from buildstockbatch.cloud import docker_base
 from buildstockbatch.cloud.docker_base import DockerBatchBase
 from buildstockbatch.exc import ValidationError
 from buildstockbatch.utils import (
-    calc_hash_for_file,
-    compress_file,
     get_project_configuration,
     log_error_details,
-    read_csv,
 )
 
 
@@ -128,6 +120,28 @@ def delete_job(job_name):
     operation.result()
 
 
+class TsvLogger:
+    """Collects pairs of headers and values, and then outputs to the logger the set of headers on
+    one line and the set of values on another.
+
+    The entries (of the headers and values) are separated by tabs (for easy pasting into a
+    spreadsheet), and may also have spaces for padding so headers and values line up in logging
+    output.
+    """
+
+    def __init__(self):
+        self.headers, self.values = [], []
+
+    def append_stat(self, header, value):
+        width = max(len(str(header)), len(str(value)))
+        self.headers.append(str(header).rjust(width))
+        self.values.append(str(value).rjust(width))
+
+    def log_stats(self, level):
+        logger.log(level, "\t".join(self.headers))
+        logger.log(level, "\t".join(self.values))
+
+
 class GcpBatch(DockerBatchBase):
     # https://patorjk.com/software/taag/#p=display&f=Santa%20Clara&t=BuildStockBatch%20%20%2F%20GCP
     LOGO = """
@@ -137,6 +151,9 @@ class GcpBatch(DockerBatchBase):
     /___/(_/_(_(/_(_/_(___)(__(_)(__/ |_/___/(_/(_(__(__/ /_    /     (___/(___/  /
       Executing BuildStock projects with grace since 2018
 """
+    # Default post-processing resources
+    DEFAULT_PP_CPUS = 2
+    DEFAULT_PP_MEMORY_MIB = 4096
 
     def __init__(self, project_filename, job_identifier=None):
         """
@@ -163,6 +180,11 @@ class GcpBatch(DockerBatchBase):
         self.batch_array_size = self.cfg["gcp"]["batch_array_size"]
 
     @staticmethod
+    def get_AR_repo_name(gcp_project, region, repo):
+        """Returns the full name of a repository in Artifact Registry."""
+        return f"projects/{gcp_project}/locations/{region}/repositories/{repo}"
+
+    @staticmethod
     def validate_gcp_args(project_file):
         cfg = get_project_configuration(project_file)
         assert "gcp" in cfg, 'Project config must contain a "gcp" section'
@@ -187,7 +209,7 @@ class GcpBatch(DockerBatchBase):
         # Check that artifact registry repository exists
         repo = cfg["gcp"]["artifact_registry"]["repository"]
         ar_client = artifactregistry_v1.ArtifactRegistryClient()
-        repo_name = f"projects/{gcp_project}/locations/{region}/repositories/{repo}"
+        repo_name = GcpBatch.get_AR_repo_name(gcp_project, region, repo)
         try:
             ar_client.get_repository(name=repo_name)
         except exceptions.NotFound:
@@ -195,13 +217,36 @@ class GcpBatch(DockerBatchBase):
                 f"Artifact Registry repository {repo} does not exist in project {gcp_project} and region {region}"
             )
 
+        # Check post-processing resources
+        pp_env = cfg["gcp"].get("postprocessing_environment")
+        if pp_env:
+            cpus = pp_env.get("cpus", GcpBatch.DEFAULT_PP_CPUS)
+            memory = pp_env.get("memory_mib", GcpBatch.DEFAULT_PP_MEMORY_MIB)
+
+            # Allowable values are documented at:
+            # https://cloud.google.com/python/docs/reference/run/latest/google.cloud.run_v2.types.ResourceRequirements
+            cpus_to_memory_limits = {
+                1: (512, 4096),
+                2: (512, 8192),
+                4: (2048, 16384),
+                8: (4096, 32768),
+            }
+
+            assert cpus in cpus_to_memory_limits, "gcp.postprocessing_environment.cpus must be 1, 2, 4 or 8."
+            min_memory, max_memory = cpus_to_memory_limits[cpus]
+            assert memory >= min_memory, (
+                f"gcp.postprocessing_environment.memory_mib must be at least {min_memory} for {cpus} CPUs. "
+                f"(Found {memory}) See https://cloud.google.com/run/docs/configuring/services/cpu"
+            )
+            assert memory <= max_memory, (
+                f"gcp.postprocessing_environment.memory_mib must be less than or equal to {max_memory} for {cpus} CPUs "
+                f"(Found {memory}) See https://cloud.google.com/run/docs/configuring/services/memory-limits"
+            )
+
     @staticmethod
     def validate_project(project_file):
         super(GcpBatch, GcpBatch).validate_project(project_file)
         GcpBatch.validate_gcp_args(project_file)
-        logger.warning("TODO: validate_project() not completely implemented, yet!")
-        return  # todo-xxx- to be (re)implemented
-        GcpBatch.validate_dask_settings(project_file)
 
     @property
     def docker_image(self):
@@ -245,13 +290,14 @@ class GcpBatch(DockerBatchBase):
 
     @property
     def postprocessing_job_name(self):
-        return f"projects/{self.gcp_project}/locations/{self.region}" \
-               f"/jobs/{self.postprocessing_job_id}"
+        return f"projects/{self.gcp_project}/locations/{self.region}/jobs/{self.postprocessing_job_id}"
 
     @property
     def postprocessing_job_console_url(self):
-        return f"https://console.cloud.google.com/run/jobs/details/{self.region}" \
-               f"/{self.postprocessing_job_id}/executions?project={self.gcp_project}"
+        return (
+            f"https://console.cloud.google.com/run/jobs/details/{self.region}"
+            f"/{self.postprocessing_job_id}/executions?project={self.gcp_project}"
+        )
 
     # todo: aws-shared (see file comment)
     def build_image(self):
@@ -384,25 +430,36 @@ class GcpBatch(DockerBatchBase):
         delete_job(self.gcp_batch_job_name)
         self.clean_postprocessing_job()
 
+        # Clean up images in Artifact Registry
+        ar_client = artifactregistry_v1.ArtifactRegistryClient()
+        repo_name = self.get_AR_repo_name(self.gcp_project, self.region, self.ar_repo)
+        package = f"{repo_name}/packages/buildstockbatch"
+        # Delete the tag used by this job
+        try:
+            ar_client.delete_tag(name=f"{package}/tags/{self.job_identifier}")
+        except exceptions.NotFound:
+            logger.debug(f"No `{self.job_identifier}` tag found in Aritfact Registry")
 
-    def list_jobs(self):
-        """
-        List existing GCP Batch jobs that match the provided project.
-        """
-        # TODO: this only shows jobs that exist in GCP Batch - update it to also
-        # show any post-processing steps that may be running.
-        client = batch_v1.BatchServiceClient()
+        # Then delete all untagged versions
+        all_versions = ar_client.list_versions(
+            artifactregistry_v1.ListVersionsRequest(parent=package, view=artifactregistry_v1.VersionView.FULL)
+        )
+        deleted = 0
+        for version in all_versions:
+            if not version.related_tags:
+                logger.debug(f"Deleting image {version.name}")
+                ar_client.delete_version(name=version.name)
+                deleted += 1
+        logger.info(f"Cleaned up {deleted} old docker images")
 
-        request = batch_v1.ListJobsRequest()
-        request.parent = f"projects/{self.gcp_project}/locations/{self.region}"
-        request.filter = f"name:{request.parent}/jobs/{self.job_identifier}"
-        request.order_by = "create_time desc"
-        request.page_size = 10
-        logger.info(f"Showing the first 10 existing jobs that match: {request.filter}\n")
-        response = client.list_jobs(request)
-        for job in response.jobs:
-            logger.debug(job)
-            logger.info(f"Name: {job.name}")
+    def show_jobs(self):
+        """
+        Show the existing GCP Batch and Cloud Run jobs that match the provided project, if they exist.
+        """
+        # GCP Batch job that runs the simulations
+        if job := self.get_existing_batch_job():
+            logger.info("Batch job")
+            logger.info(f"  Name: {job.name}")
             logger.info(f"  UID: {job.uid}")
             logger.info(f"  Status: {job.status.state.name}")
             task_counts = collections.defaultdict(int)
@@ -410,143 +467,89 @@ class GcpBatch(DockerBatchBase):
                 for status, count in group.counts.items():
                     task_counts[status] += count
             logger.info(f"  Task statuses: {dict(task_counts)}")
+            logger.debug(f"Full job info:\n{job}")
+        else:
+            logger.info(f"No existing Batch jobs match: {self.gcp_batch_job_name}")
+        logger.info(f"See all Batch jobs at https://console.cloud.google.com/batch/jobs?project={self.gcp_project}")
 
-    def run_batch(self):
+        # Postprocessing Cloud Run job
+        jobs_client = run_v2.JobsClient()
+        try:
+            job = jobs_client.get_job(name=self.postprocessing_job_name)
+            last_execution = job.latest_created_execution
+            status = "Running"
+            if last_execution.completion_time:
+                status = "Completed"
+            logger.info("Post-processing Cloud Run job")
+            logger.info(f"  Name: {job.name}")
+            logger.info(f"  Status of latest run ({last_execution.name}): {status}")
+            logger.debug(f"Full job info:\n{job}")
+        except exceptions.NotFound:
+            logger.info(f"No existing Cloud Run jobs match {self.postprocessing_job_name}")
+        logger.info(f"See all Cloud Run jobs at https://console.cloud.google.com/run/jobs?project={self.gcp_project}")
+
+    def get_existing_batch_job(self):
+        client = batch_v1.BatchServiceClient()
+        try:
+            job = client.get_job(batch_v1.GetJobRequest(name=self.gcp_batch_job_name))
+            return job
+        except exceptions.NotFound:
+            return None
+
+    def get_existing_postprocessing_job(self):
+        jobs_client = run_v2.JobsClient()
+        try:
+            job = jobs_client.get_job(name=self.postprocessing_job_name)
+            return job
+        except exceptions.NotFound:
+            return False
+
+    def check_for_existing_jobs(self, pp_only=False):
+        """If there are existing jobs with the same ID as this job, logs them as errors and returns True.
+
+        Checks for both the Batch job and Cloud Run post-processing job.
+
+        :param pp_only: If true, only check for the post-processing job.
         """
-        Start the GCP Batch job to run all the building simulations.
-
-        This will
-            - perform the sampling
-            - package and upload the assets, including weather
-            - kick off a batch simulation on GCP
-        """
-        gcp_cfg = self.cfg["gcp"]
-
-        # Step 1: Run sampling and split up buildings into batches.
-        buildstock_csv_filename = self.sampler.run_sampling()
-
-        # Step 2: Compress and upload weather data and any other required files to GCP
-        # todo: aws-shared (see file comment)
-        logger.info("Collecting and uploading input files")
-        with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir, tempfile.TemporaryDirectory(
-            prefix="bsb_"
-        ) as tmp_weather_dir:  # noqa: E501
-            self._weather_dir = tmp_weather_dir
-            self._get_weather_files()
-            tmppath = pathlib.Path(tmpdir)
-            logger.debug("Creating assets tarfile")
-            with tarfile.open(tmppath / "assets.tar.gz", "x:gz") as tar_f:
-                project_path = pathlib.Path(self.project_dir)
-                buildstock_path = pathlib.Path(self.buildstock_dir)
-                tar_f.add(buildstock_path / "measures", "measures")
-                if os.path.exists(buildstock_path / "resources/hpxml-measures"):
-                    tar_f.add(buildstock_path / "resources/hpxml-measures", "resources/hpxml-measures")
-                tar_f.add(buildstock_path / "resources", "lib/resources")
-                tar_f.add(project_path / "housing_characteristics", "lib/housing_characteristics")
-
-            # Weather files
-            weather_path = tmppath / "weather"
-            os.makedirs(weather_path)
-
-            # Determine the unique weather files
-            epw_filenames = list(filter(lambda x: x.endswith(".epw"), os.listdir(self.weather_dir)))
-            logger.debug("Calculating hashes for weather files")
-            epw_hashes = Parallel(n_jobs=-1, verbose=5)(
-                delayed(calc_hash_for_file)(pathlib.Path(self.weather_dir) / epw_filename)
-                for epw_filename in epw_filenames
-            )
-            unique_epws = collections.defaultdict(list)
-            for epw_filename, epw_hash in zip(epw_filenames, epw_hashes):
-                unique_epws[epw_hash].append(epw_filename)
-
-            # Compress unique weather files
-            logger.debug("Compressing weather files")
-            Parallel(n_jobs=-1, verbose=5)(
-                delayed(compress_file)(pathlib.Path(self.weather_dir) / x[0], str(weather_path / x[0]) + ".gz")
-                for x in list(unique_epws.values())
+        if pp_only:
+            existing_batch_job = None
+        elif existing_batch_job := self.get_existing_batch_job():
+            logger.error(
+                f"A Batch job with this ID ({self.job_identifier}) already exists "
+                f"(status: {existing_batch_job.status.state.name}). Choose a new job_identifier or run with "
+                "--clean to delete the existing job."
             )
 
-            logger.debug("Writing project configuration for upload")
-            with open(tmppath / "config.json", "wt", encoding="utf-8") as f:
-                json.dump(self.cfg, f)
+        if existing_pp_job := self.get_existing_postprocessing_job():
+            status = "Completed" if existing_pp_job.latest_created_execution.completion_time else "Running"
+            logger.error(
+                f"A Cloud Run job with this ID ({self.postprocessing_job_id}) already exists "
+                f"(status: {status}). Choose a new job_identifier or run with --clean "
+                "to delete the existing job."
+            )
+        return bool(existing_batch_job or existing_pp_job)
 
-            # Collect simulations to queue
-            df = read_csv(buildstock_csv_filename, index_col=0, dtype=str)
-            self.validate_buildstock_csv(self.project_filename, df)
-            building_ids = df.index.tolist()
-            n_datapoints = len(building_ids)
-            n_sims = n_datapoints * (len(self.cfg.get("upgrades", [])) + 1)
-            logger.debug("Total number of simulations = {}".format(n_sims))
+    def upload_batch_files_to_cloud(self, tmppath):
+        """Implements :func:`DockerBase.upload_batch_files_to_cloud`"""
+        logger.info("Uploading Batch files to Cloud Storage")
+        upload_directory_to_GCS(tmppath, self.gcs_bucket, self.gcs_prefix + "/")
 
-            # GCP Batch allows up to 100,000 tasks, but limit to 10,000 here for consistency with AWS implementation.
-            if self.batch_array_size <= 10000:
-                max_array_size = self.batch_array_size
-            else:
-                max_array_size = 10000
-            n_sims_per_job = math.ceil(n_sims / max_array_size)
-            n_sims_per_job = max(n_sims_per_job, 2)
-            logger.debug("Number of simulations per array job = {}".format(n_sims_per_job))
+    def copy_files_at_cloud(self, files_to_copy):
+        """Implements :func:`DockerBase.copy_files_at_cloud`"""
+        logger.info("Copying weather files at Cloud Storage")
+        Parallel(n_jobs=-1, verbose=9)(
+            delayed(copy_GCS_file)(
+                self.gcs_bucket,
+                f"{self.gcs_prefix}/weather/{src}",
+                self.gcs_bucket,
+                f"{self.gcs_prefix}/weather/{dest}",
+            )
+            for src, dest in files_to_copy
+        )
 
-            # Create list of (building ID, upgrade to apply) pairs for all simulations to run.
-            baseline_sims = zip(building_ids, itertools.repeat(None))
-            upgrade_sims = itertools.product(building_ids, range(len(self.cfg.get("upgrades", []))))
-            all_sims = list(itertools.chain(baseline_sims, upgrade_sims))
-            random.shuffle(all_sims)
-            all_sims_iter = iter(all_sims)
-
-            os.makedirs(tmppath / "jobs")
-
-            # Write each batch of simulations to a file.
-            logger.info("Creating batches of jobs")
-            for i in itertools.count(0):
-                batch = list(itertools.islice(all_sims_iter, n_sims_per_job))
-                if not batch:
-                    break
-                job_json_filename = tmppath / "jobs" / "job{:05d}.json".format(i)
-                with open(job_json_filename, "w") as f:
-                    json.dump(
-                        {
-                            "job_num": i,
-                            "n_datapoints": n_datapoints,
-                            "batch": batch,
-                        },
-                        f,
-                        indent=4,
-                    )
-            task_count = i
-            logger.debug("Task count = {}".format(task_count))
-
-            # Compress job jsons
-            jobs_dir = tmppath / "jobs"
-            logger.debug("Compressing job jsons using gz")
-            tick = time.time()
-            with tarfile.open(tmppath / "jobs.tar.gz", "w:gz") as tf:
-                tf.add(jobs_dir, arcname="jobs")
-            tick = time.time() - tick
-            logger.debug("Done compressing job jsons using gz {:.1f} seconds".format(tick))
-            shutil.rmtree(jobs_dir)
-
-            os.makedirs(tmppath / "results" / "simulation_output")
-
-            logger.debug(f"Uploading files to GCS bucket: {self.gcs_bucket}")
-            # TODO: Consider creating a unique directory each time a job is run,
-            # to avoid accidentally overwriting previous results
-            upload_directory_to_GCS(tmppath, self.gcs_bucket, self.gcs_prefix + "/")
-
-        # Copy the non-unique weather files on GCS
-        epws_to_copy = []
-        for epws in unique_epws.values():
-            # The first in the list is already up there, copy the rest
-            for filename in epws[1:]:
-                epws_to_copy.append(
-                    (f"{self.gcs_prefix}/weather/{epws[0]}.gz", f"{self.gcs_prefix}/weather/{filename}.gz")
-                )
-
-        logger.info("Copying weather files on GCS")
-        bucket = self.gcs_bucket
-        Parallel(n_jobs=-1, verbose=5)(delayed(copy_GCS_file)(bucket, src, bucket, dest) for src, dest in epws_to_copy)
-
-        # Step 3: Define and run the GCP Batch job.
+    def start_batch_job(self, batch_info):
+        """Implements :func:`DockerBase.start_batch_job`"""
+        # Define and run the GCP Batch job.
         logger.info("Setting up GCP Batch job")
         client = batch_v1.BatchServiceClient()
 
@@ -567,24 +570,35 @@ class GcpBatch(DockerBatchBase):
 
         runnable.container.commands = ["-c", "python3 -m buildstockbatch.gcp.gcp"]
 
+        gcp_cfg = self.cfg["gcp"]
         job_env_cfg = gcp_cfg.get("job_environment", {})
         resources = batch_v1.ComputeResource(
             cpu_milli=1000 * job_env_cfg.get("vcpus", 1),
             memory_mib=job_env_cfg.get("memory_mib", 1024),
         )
 
+        # Give three minutes per simulation, plus ten minutes for job overhead
+        task_duration_secs = 60 * (10 + batch_info.n_sims_per_job * 3)
         task = batch_v1.TaskSpec(
             runnables=[runnable],
             compute_resource=resources,
-            # TODO: Confirm what happens if this fails repeatedly, or for only some tasks, and document it.
-            max_retry_count=2,
-            # TODO: How long does this timeout need to be?
-            max_run_duration="5000s",
+            # Allow retries, but only when the machine is preempted.
+            max_retry_count=3,
+            lifecycle_policies=[
+                batch_v1.LifecyclePolicy(
+                    action=batch_v1.LifecyclePolicy.Action.RETRY_TASK,
+                    action_condition=batch_v1.LifecyclePolicy.ActionCondition(
+                        exit_codes=[50001]  # Exit code for preemptions
+                    ),
+                )
+            ],
+            max_run_duration=f"{task_duration_secs}s",
         )
 
         # How many of these tasks to run.
         group = batch_v1.TaskGroup(
-            task_count=task_count,
+            task_count=batch_info.job_count,
+            parallelism=gcp_cfg.get("parallelism", None),
             task_spec=task,
         )
 
@@ -600,9 +614,8 @@ class GcpBatch(DockerBatchBase):
         )
         instances = batch_v1.AllocationPolicy.InstancePolicyOrTemplate(policy=policy)
         allocation_policy = batch_v1.AllocationPolicy(instances=[instances])
-        # TODO: Add option to set service account that runs the job?
-        # Otherwise uses the project's default compute engine service account.
-        # allocation_policy.service_account = batch_v1.ServiceAccount(email = '')
+        if service_account := gcp_cfg.get("service_account"):
+            allocation_policy.service_account = batch_v1.ServiceAccount(email=service_account)
 
         # Define the batch job
         job = batch_v1.Job()
@@ -610,6 +623,9 @@ class GcpBatch(DockerBatchBase):
         job.allocation_policy = allocation_policy
         job.logs_policy = batch_v1.LogsPolicy()
         job.logs_policy.destination = batch_v1.LogsPolicy.Destination.CLOUD_LOGGING
+        job.labels = {
+            "bsb_job_identifier": self.job_identifier,
+        }
 
         create_request = batch_v1.CreateJobRequest()
         create_request.job = job
@@ -627,12 +643,16 @@ class GcpBatch(DockerBatchBase):
             "https://console.cloud.google.com/batch/jobsDetail/regions/"
             f"{self.region}/jobs/{self.job_identifier}/details?project={self.gcp_project}"
         )
+        logger.info(
+            "Simulation output browser (Cloud Console): "
+            f"https://console.cloud.google.com/storage/browser/{self.gcs_bucket}/{self.gcs_prefix}/results/simulation_output"
+        )
         logger.info(f"View GCP Batch job at {job_url}")
 
         # Monitor job status while waiting for the job to complete
-        n_succeeded_last_time = 0
+        n_completed_last_time = 0
         client = batch_v1.BatchServiceClient()
-        with tqdm.tqdm(desc="Running Simulations", total=task_count, unit="batch") as progress_bar:
+        with tqdm.tqdm(desc="Running Simulations", total=batch_info.job_count, unit="task") as progress_bar:
             job_status = None
             while job_status not in ("SUCCEEDED", "FAILED", "DELETION_IN_PROGRESS"):
                 time.sleep(10)
@@ -643,15 +663,32 @@ class GcpBatch(DockerBatchBase):
                 for group in job_info.status.task_groups.values():
                     for status, count in group.counts.items():
                         task_counts[status] += count
-                n_succeeded = task_counts.get("SUCCEEDED", 0)
-                progress_bar.update(n_succeeded - n_succeeded_last_time)
-                n_succeeded_last_time = n_succeeded
+                n_completed = task_counts.get("SUCCEEDED", 0) + task_counts.get("FAILED", 0)
+                progress_bar.update(n_completed - n_completed_last_time)
+                n_completed_last_time = n_completed
                 # Show all task status counts next to the progress bar
                 progress_bar.set_postfix_str(f"{dict(task_counts)}")
 
         logger.info(f"Batch job status: {job_status}")
+        logger.info(f"Batch job tasks: {dict(task_counts)}")
         if job_status != "SUCCEEDED":
-            raise RuntimeError("Batch job failed. See GCP logs at {job_url}")
+            raise RuntimeError(f"Batch job failed. See GCP logs at {job_url}")
+        else:
+            task_group = job_info.task_groups[0]
+            task_spec = task_group.task_spec
+            instance = job_info.status.task_groups["group0"].instances[0]
+
+            # Output stats in spreadsheet-friendly format
+            tsv_logger = TsvLogger()
+            tsv_logger.append_stat("Simulations", batch_info.n_sims)
+            tsv_logger.append_stat("Tasks", task_group.task_count)
+            tsv_logger.append_stat("Parallelism", task_group.parallelism)
+            tsv_logger.append_stat("mCPU/task", task_spec.compute_resource.cpu_milli)
+            tsv_logger.append_stat("MiB/task", task_spec.compute_resource.memory_mib)
+            tsv_logger.append_stat("Machine type", instance.machine_type)
+            tsv_logger.append_stat("Provisioning", instance.provisioning_model.name)
+            tsv_logger.append_stat("Runtime", job_info.status.run_duration)
+            tsv_logger.log_stats(logging.INFO)
 
     @classmethod
     def run_task(cls, task_index, job_name, gcs_bucket, gcs_prefix):
@@ -696,33 +733,7 @@ class GcpBatch(DockerBatchBase):
         weather_dir = sim_dir / "weather"
         os.makedirs(weather_dir, exist_ok=True)
 
-        # Make a lookup of which parameter points to the weather file from options_lookup.tsv
-        with open(sim_dir / "lib" / "resources" / "options_lookup.tsv", "r", encoding="utf-8") as f:
-            tsv_reader = csv.reader(f, delimiter="\t")
-            next(tsv_reader)  # skip headers
-            param_name = None
-            epws_by_option = {}
-            for row in tsv_reader:
-                row_has_epw = [x.endswith(".epw") for x in row[2:]]
-                if sum(row_has_epw):
-                    if row[0] != param_name and param_name is not None:
-                        raise RuntimeError(
-                            "The epw files are specified in options_lookup.tsv under more than one parameter "
-                            f"type: {param_name}, {row[0]}"
-                        )  # noqa: E501
-                    epw_filename = row[row_has_epw.index(True) + 2].split("=")[1]
-                    param_name = row[0]
-                    option_name = row[1]
-                    epws_by_option[option_name] = epw_filename
-
-        # Look through the buildstock.csv to find the appropriate location and epw
-        epws_to_download = set()
-        building_ids = [x[0] for x in jobs_d["batch"]]
-        with open(sim_dir / "lib" / "housing_characteristics" / "buildstock.csv", "r", encoding="utf-8") as f:
-            csv_reader = csv.DictReader(f)
-            for row in csv_reader:
-                if int(row["Building"]) in building_ids:
-                    epws_to_download.add(epws_by_option[row[param_name]])
+        epws_to_download = docker_base.determine_epws_needed_for_job(sim_dir, jobs_d)
 
         # Download and unzip the epws needed for these simulations
         for epw_filename in epws_to_download:
@@ -733,88 +744,8 @@ class GcpBatch(DockerBatchBase):
                 with open(weather_dir / epw_filename, "wb") as f_out:
                     logger.debug("Extracting {}".format(epw_filename))
                     f_out.write(gzip.decompress(f_gz.getvalue()))
-        asset_dirs = os.listdir(sim_dir)
 
-        gcs_fs = GCSFileSystem()
-        local_fs = LocalFileSystem()
-        reporting_measures = cls.get_reporting_measures(cfg)
-        dpouts = []
-        simulation_output_tar_filename = sim_dir.parent / "simulation_outputs.tar.gz"
-        with tarfile.open(str(simulation_output_tar_filename), "w:gz") as simout_tar:
-            for building_id, upgrade_idx in jobs_d["batch"]:
-                upgrade_id = 0 if upgrade_idx is None else upgrade_idx + 1
-                sim_id = f"bldg{building_id:07d}up{upgrade_id:02d}"
-
-                # Create OSW
-                osw = cls.create_osw(cfg, jobs_d["n_datapoints"], sim_id, building_id, upgrade_idx)
-                with open(os.path.join(sim_dir, "in.osw"), "w") as f:
-                    json.dump(osw, f, indent=4)
-
-                # Run Simulation
-                with open(sim_dir / "os_stdout.log", "w") as f_out:
-                    try:
-                        logger.debug("Running {}".format(sim_id))
-                        subprocess.run(
-                            ["openstudio", "run", "-w", "in.osw"],
-                            check=True,
-                            stdout=f_out,
-                            stderr=subprocess.STDOUT,
-                            cwd=str(sim_dir),
-                        )
-                    except subprocess.CalledProcessError:
-                        logger.debug(f"Simulation failed: see {sim_id}/os_stdout.log")
-
-                # Clean Up simulation directory
-                cls.cleanup_sim_dir(
-                    sim_dir,
-                    gcs_fs,
-                    f"{gcs_bucket}/{gcs_prefix}/results/simulation_output/timeseries",
-                    upgrade_id,
-                    building_id,
-                )
-
-                # Read data_point_out.json
-                dpout = postprocessing.read_simulation_outputs(
-                    local_fs, reporting_measures, str(sim_dir), upgrade_id, building_id
-                )
-                dpouts.append(dpout)
-
-                # Add the rest of the simulation outputs to the tar archive
-                logger.info("Archiving simulation outputs")
-                for dirpath, dirnames, filenames in os.walk(sim_dir):
-                    if dirpath == str(sim_dir):
-                        for dirname in set(dirnames).intersection(asset_dirs):
-                            dirnames.remove(dirname)
-                    for filename in filenames:
-                        abspath = os.path.join(dirpath, filename)
-                        relpath = os.path.relpath(abspath, sim_dir)
-                        simout_tar.add(abspath, os.path.join(sim_id, relpath))
-
-                # Clear directory for next simulation
-                logger.debug("Clearing out simulation directory")
-                for item in set(os.listdir(sim_dir)).difference(asset_dirs):
-                    if os.path.isdir(item):
-                        shutil.rmtree(item)
-                    elif os.path.isfile(item):
-                        os.remove(item)
-
-        blob = bucket.blob(f"{gcs_prefix}/results/simulation_output/simulations_job{task_index}.tar.gz")
-        blob.upload_from_filename(simulation_output_tar_filename)
-
-        # Upload aggregated dpouts as a json file
-        with gcs_fs.open(
-            f"{gcs_bucket}/{gcs_prefix}/results/simulation_output/results_job{task_index}.json.gz", "wb"
-        ) as f1:
-            with gzip.open(f1, "wt", encoding="utf-8") as f2:
-                json.dump(dpouts, f2)
-
-        # Remove files (it helps docker if we don't leave a bunch of files laying around)
-        os.remove(simulation_output_tar_filename)
-        for item in os.listdir(sim_dir):
-            if os.path.isdir(item):
-                shutil.rmtree(item)
-            elif os.path.isfile(item):
-                os.remove(item)
+        cls.run_simulations(cfg, task_index, jobs_d, sim_dir, GCSFileSystem(), f"{gcs_bucket}/{gcs_prefix}")
 
     # todo: Do cleanup (which the aws script does, in the 'nrel/aws_batch' branch)
     # todo: aws-shared (see file comment): Such cleanup should be shared with the aws script.
@@ -863,7 +794,7 @@ class GcpBatch(DockerBatchBase):
 
         if not skip_combine:
             self.start_combine_results_job_on_cloud(self.results_dir, do_timeseries=do_timeseries)
-
+        self.log_summary()
 
     @classmethod
     def run_combine_results_on_cloud(cls, gcs_bucket, gcs_prefix, results_dir, do_timeseries):
@@ -881,7 +812,6 @@ class GcpBatch(DockerBatchBase):
         DaskClient()
         postprocessing.combine_results(GCSFileSystem(), results_dir, cfg, do_timeseries=do_timeseries)
 
-
     def start_combine_results_job_on_cloud(self, results_dir, do_timeseries=True):
         """Set up `combine_results` to be run on GCP Cloud Run.
 
@@ -891,6 +821,8 @@ class GcpBatch(DockerBatchBase):
 
         # Define the Job
         pp_env_cfg = self.cfg["gcp"].get("postprocessing_environment", {})
+        memory_mib = pp_env_cfg.get("memory_mib", self.DEFAULT_PP_MEMORY_MIB)
+        cpus = pp_env_cfg.get("cpus", self.DEFAULT_PP_CPUS)
         job = run_v2.Job(
             template=run_v2.ExecutionTemplate(
                 template=run_v2.TaskTemplate(
@@ -900,8 +832,8 @@ class GcpBatch(DockerBatchBase):
                             image=self.repository_uri + ":" + self.job_identifier,
                             resources=run_v2.ResourceRequirements(
                                 limits={
-                                    "memory": f"{pp_env_cfg.get('memory_mib', 4096)}Mi",
-                                    "cpu": str(pp_env_cfg.get('cpus', 2)),
+                                    "memory": f"{memory_mib}Mi",
+                                    "cpu": str(cpus),
                                 }
                             ),
                             command=["/bin/sh"],
@@ -911,14 +843,18 @@ class GcpBatch(DockerBatchBase):
                                 run_v2.EnvVar(name="GCS_PREFIX", value=self.gcs_prefix),
                                 run_v2.EnvVar(name="GCS_BUCKET", value=self.gcs_bucket),
                                 run_v2.EnvVar(name="RESULTS_DIR", value=results_dir),
-                                run_v2.EnvVar(name="DO_TIMESERIES", value="True" if do_timeseries else "False")
+                                run_v2.EnvVar(name="DO_TIMESERIES", value="True" if do_timeseries else "False"),
                             ],
                         )
                     ],
-                    timeout=f"{60 * 60 * 24}s", # 24h
+                    timeout=f"{60 * 60 * 24}s",  # 24h
                     max_retries=0,
+                    service_account=self.cfg["gcp"].get("service_account"),
                 )
-            )
+            ),
+            labels={
+                "bsb_job_identifier": self.job_identifier,
+            },
         )
 
         # Create the job
@@ -927,28 +863,132 @@ class GcpBatch(DockerBatchBase):
             run_v2.CreateJobRequest(
                 parent=f"projects/{self.gcp_project}/locations/{self.region}",
                 job_id=self.postprocessing_job_id,
-                job=job
+                job=job,
             )
         )
-        logger.info("Cloud Run job created (but not yet started). See status at:"
-                    f" {self.postprocessing_job_console_url}")
 
         # Start the job!
-        jobs_client.run_job(name=self.postprocessing_job_name)
-        logger.info("Post-processing Cloud Run job started! You will need to run this script with "
-                    "--clean to clean up GCP environment after post-processing is complete.")
+        attempts_remaining = 3
+        while True:
+            try:
+                jobs_client.run_job(name=self.postprocessing_job_name)
+                logger.info(
+                    f"""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║ Post-processing Cloud Run Job started!                                       ║
+║                                                                              ║
+║ You may interrupt the script and the job will continue to run.               ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+🔗 See status at: {self.postprocessing_job_console_url}.
+Results output browser (Cloud Console): https://console.cloud.google.com/storage/browser/{self.gcs_bucket}/{self.gcs_prefix}/results/
+
+Run this script with --clean to clean up the GCP environment after post-processing is complete."""
+                )
+                break
+            except:
+                attempts_remaining -= 1
+                if attempts_remaining > 0:
+                    # retry after delay
+                    logger.warning(
+                        "Post-processing Cloud Run job failed to start. "
+                        f"{attempts_remaining} attempt(s) remaining. "
+                        "Will retry in 1 second...",
+                        exc_info=logger.isEnabledFor(logging.DEBUG),
+                    )
+                    time.sleep(1)
+                    continue
+
+                # no attempts remaining
+                logger.warning(
+                    "Post-processing Cloud Run job failed to start after three attempts. "
+                    "You may want to investigate why and try starting it at the console: "
+                    f"{self.postprocessing_job_console_url}",
+                    exc_info=True,
+                )
+                return
+
+        # Monitor job/execution status, starting by polling the Job for an Execution
+        logger.info("Waiting for execution to begin...")
+        job_start_time = datetime.now()
+        job = self.get_existing_postprocessing_job()
+        while not job.latest_created_execution:
+            time.sleep(1)
+            job = self.get_existing_postprocessing_job()
+        execution_start_time = datetime.now()
+        logger.info(
+            f"Execution has started (after {str(execution_start_time - job_start_time)} "
+            "seconds). Waiting for execution to finish..."
+        )
+
+        # Have an execution; poll that for completion
+        fail_message = None
+        with tqdm.tqdm(
+            desc="Waiting for post-processing execution to complete", bar_format="{desc}: {elapsed}{postfix}"
+        ) as pp_tqdm:
+            spinner_states = ["|", "/", "-", "\\"]
+            spinner_state = 0
+
+            pp_tqdm.set_postfix_str("|")
+            executions_client = run_v2.ExecutionsClient()
+            execution_name = f"{self.postprocessing_job_name}/executions/{job.latest_created_execution.name}"
+            last_query_time = time.time()
+            while True:
+                # update spinner frequently...
+                time.sleep(0.25)
+                # ...but only actually query status every 10 sec
+                if time.time() - last_query_time > 10:
+                    # fetch and extract the status
+                    execution = executions_client.get_execution(name=execution_name)
+                    last_query_time = time.time()
+
+                    if execution.succeeded_count > 0:
+                        # Done!
+                        break
+                    elif execution.failed_count > 0:
+                        fail_message = "🟥 Post-processing execution failed."
+                        break
+                    elif execution.cancelled_count > 0:
+                        fail_message = "🟧 Post-processing execution canceled."
+                        break
+
+                spinner_state = (spinner_state + 1) % len(spinner_states)
+                pp_tqdm.set_postfix_str(spinner_states[spinner_state])
+                pp_tqdm.update()
+
+        if fail_message is not None:
+            # if logged within the tqdm block, the message ends up on the same line as the status
+            logger.warning(f"{fail_message} See {self.postprocessing_job_console_url} for more information")
+            return
+
+        logger.info(f"🟢 Post-processing finished! ({str(datetime.now() - execution_start_time)}). ")
+
+        # Output stats in spreadsheet-friendly format
+        # completion_time might not be set right away; if not, just use current time (close enough)
+        finish_time = execution.completion_time if execution.completion_time is not None else datetime.now()
+        tsv_logger = TsvLogger()
+        tsv_logger.append_stat("cpus", cpus)
+        tsv_logger.append_stat("memory_mib", memory_mib)
+        tsv_logger.append_stat("Succeeded", "Yes")
+        tsv_logger.append_stat("Job Created", job.create_time.strftime("%H:%M:%S"))
+        tsv_logger.append_stat("Exec Start", execution.start_time.strftime("%H:%M:%S"))
+        tsv_logger.append_stat("Script Start", "?")
+        tsv_logger.append_stat("Exec Finish", finish_time.strftime("%H:%M:%S"))
+        tsv_logger.log_stats(logging.INFO)
 
     def clean_postprocessing_job(self):
-        jobs_client = run_v2.JobsClient()
-        logger.info("Cleaning post-processing Cloud Run job with "
-                     f"job_identifier='{self.job_identifier}'; "
-                     f"job name={self.postprocessing_job_name}...")
-        try:
-            job = jobs_client.get_job(name=self.postprocessing_job_name)
-        except Exception:
-            logger.warning("Post-processing Cloud Run job not found for "
-                           f"job_identifier='{self.job_identifier}' "
-                           f"(postprocessing_job_name='{self.postprocessing_job_name}').")
+        logger.info(
+            "Cleaning post-processing Cloud Run job with "
+            f"job_identifier='{self.job_identifier}'; "
+            f"job name={self.postprocessing_job_name}..."
+        )
+        job = self.get_existing_postprocessing_job()
+        if not job:
+            logger.warning(
+                "Post-processing Cloud Run job not found for "
+                f"job_identifier='{self.job_identifier}' "
+                f"(postprocessing_job_name='{self.postprocessing_job_name}')."
+            )
             return
 
         # Ask for confirmation to delete if it is not completed
@@ -965,19 +1005,21 @@ class GcpBatch(DockerBatchBase):
             try:
                 executions_client.cancel_execution(name=job.latest_created_execution.name)
             except Exception:
-                logger.warning("Failed to cancel execution with"
-                               f" name={job.latest_created_execution.name}.", exc_info=True)
-                logger.warning(f"You may want to try deleting the job via the console:"
-                               f" {self.postprocessing_job_console_url}")
+                logger.warning(
+                    "Failed to cancel execution with name={job.latest_created_execution.name}.", exc_info=True
+                )
+                logger.warning(
+                    f"You may want to try deleting the job via the console: {self.postprocessing_job_console_url}"
+                )
             return
 
         # ... The job succeeded or its execution was deleted successfully; it can be deleted
+        jobs_client = run_v2.JobsClient()
         try:
             jobs_client.delete_job(name=self.postprocessing_job_name)
         except Exception:
             logger.warning("Failed to deleted post-processing Cloud Run job.", exc_info=True)
         logger.info(f"Post-processing Cloud Run job deleted: '{self.postprocessing_job_name}'")
-
 
     def upload_results(self, *args, **kwargs):
         """
@@ -1053,7 +1095,7 @@ def main():
             help="Only validate the project YAML file and references. Nothing is executed",
             action="store_true",
         )
-        group.add_argument("--list_jobs", help="List existing jobs", action="store_true")
+        group.add_argument("--show_jobs", help="List existing jobs", action="store_true")
         group.add_argument(
             "--postprocessonly",
             help="Only do postprocessing, useful for when the simulations are already done",
@@ -1086,18 +1128,21 @@ def main():
         if args.clean:
             batch.clean()
             return
-        if args.list_jobs:
-            batch.list_jobs()
+        if args.show_jobs:
+            batch.show_jobs()
             return
         elif args.postprocessonly:
+            if batch.check_for_existing_jobs(pp_only=True):
+                return
             batch.build_image()
             batch.push_image()
             batch.process_results()
         elif args.crawl:
             batch.process_results(skip_combine=True, use_dask_cluster=False)
         else:
-            # TODO: check whether this job ID already exists. If so, don't try to start a new job, and maybe reattach
-            # to the existing one if it's still running.
+            if batch.check_for_existing_jobs():
+                return
+
             batch.build_image()
             batch.push_image()
             batch.run_batch()

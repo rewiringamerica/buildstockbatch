@@ -6,6 +6,7 @@ weather_files_url: str(required=False)
 sampler: include('sampler-spec', required=True)
 workflow_generator: include('workflow-generator-spec', required=True)
 eagle: include('hpc-spec', required=False)
+kestrel: include('hpc-spec', required=False)
 gcp: include('gcp-spec', required=False)
 aws: include('aws-spec', required=False)
 output_directory: regex('^(.*\/)?[a-z][a-z0-9_]*\/?$', required=True)
@@ -25,8 +26,10 @@ gcp-spec:
   job_identifier: regex('^[a-z]([a-z0-9-]{0,46}[a-z0-9])?$', required=True)
   project: str(required=True)
   region: str(required=True)
+  service_account: str(required=False)
   artifact_registry: include('gcp-ar-spec', required=True)
   batch_array_size: num(min=1, max=10000, required=True)
+  parallelism: num(min=1, max=10000, required=False)
   gcs: include('gcs-spec', required=True)
   job_environment: include('gcp-job-environment-spec', required=False)
   postprocessing_environment: include('gcp-postprocessing_environment-spec', required=False)
@@ -45,8 +48,11 @@ gcp-job-environment-spec:
   use_spot: bool(required=False)
 
 gcp-postprocessing_environment-spec:
-  cpus: int(min=1, max=224, required=False)
-  memory_mib: int(min=512, required=False)
+  # Limits documented at
+  # https://cloud.google.com/run/docs/configuring/services/memory-limits
+  # https://cloud.google.com/run/docs/configuring/services/cpu
+  cpus: int(min=1, max=8, required=False)
+  memory_mib: int(min=512, max=32768, required=False)
 
 aws-spec:
   job_identifier: regex('^[a-zA-Z]\w{,9}$', required=True)
@@ -79,7 +85,7 @@ hpc-spec:
 hpc-postprocessing-spec:
   time: int(required=True)
   n_workers: int(min=1, max=32, required=False)
-  node_memory_mb: enum(85248, 180224, 751616, required=False)
+  node_memory_mb: int(min=85248, max=751616, required=False)
   n_procs: int(min=1, max=36, required=False)
   parquet_memory_mb: int(min=100, max=4096, required=False)
 
