@@ -5,7 +5,7 @@ buildstockbatch.gcp
 ~~~~~~~~~~~~~~~
 This class contains the object & methods that allow for usage of the library with GCP Batch.
 
-Architecture overview:
+Architecture overview (these steps are split between GcpBatch and DockerBatchBase):
     - Build a Docker image that includes OpenStudio and BuildStock Batch.
     - Push the Docker image to GCP Artifact Registry.
     - Run sampling, and split the generated buildings into batches.
