@@ -58,7 +58,7 @@ from buildstockbatch.utils import (
 logger = logging.getLogger(__name__)
 
 
-def upload_directory_to_GCS(local_directory, bucket, prefix):
+def upload_directory_to_GCS(local_directory, bucket, prefix, chunk_size_mb=None):
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket)
 
@@ -78,9 +78,12 @@ def upload_directory_to_GCS(local_directory, bucket, prefix):
         source_directory=local_dir_abs,
         blob_name_prefix=prefix,
         raise_exception=True,
+        # Default chunk size is 40 MB
         blob_constructor_kwargs={
-            "chunk_size": 5 * 1024 * 1024,  # 5 MB instead of the default 40 MB
-        },
+            "chunk_size": chunk_size_mb * 1024 * 1024,
+        }
+        if chunk_size_mb
+        else None,
     )
 
 
@@ -532,7 +535,12 @@ class GcpBatch(DockerBatchBase):
     def upload_batch_files_to_cloud(self, tmppath):
         """Implements :func:`DockerBase.upload_batch_files_to_cloud`"""
         logger.info("Uploading Batch files to Cloud Storage")
-        upload_directory_to_GCS(tmppath, self.gcs_bucket, self.gcs_prefix + "/")
+        upload_directory_to_GCS(
+            tmppath,
+            self.gcs_bucket,
+            self.gcs_prefix + "/",
+            chunk_size_mb=self.cfg["gcp"]["gcs"].get("upload_chunk_size_mb"),
+        )
 
     def copy_files_at_cloud(self, files_to_copy):
         """Implements :func:`DockerBase.copy_files_at_cloud`"""
