@@ -59,7 +59,7 @@ from buildstockbatch.utils import (
 logger = logging.getLogger(__name__)
 
 
-def upload_directory_to_GCS(local_directory, bucket, prefix, chunk_size_mb=None):
+def upload_directory_to_GCS(local_directory, bucket, prefix, chunk_size_mib=None):
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket)
 
@@ -80,18 +80,18 @@ def upload_directory_to_GCS(local_directory, bucket, prefix, chunk_size_mb=None)
             source_directory=local_dir_abs,
             blob_name_prefix=prefix,
             raise_exception=True,
-            # Default chunk size is 40 MB
+            # Default chunk size is 40 MiB
             blob_constructor_kwargs={
-                "chunk_size": chunk_size_mb * 1024 * 1024,
+                "chunk_size": chunk_size_mib * 1024 * 1024,
             }
-            if chunk_size_mb
+            if chunk_size_mib
             else None,
         )
     except requests.exceptions.ConnectionError:
         logger.error("Error while uploading files to GCS bucket.")
         logger.error(
-            "For timeout errors, consider decreasing gcp.gcs.upload_chunk_size_mb. "
-            f"(Currently {chunk_size_mb or 40} MB)"
+            "For timeout errors, consider decreasing gcp.gcs.upload_chunk_size_mib. "
+            f"(Currently {chunk_size_mib or 40} MiB)"
         )
         raise
 
@@ -548,7 +548,7 @@ class GcpBatch(DockerBatchBase):
             tmppath,
             self.gcs_bucket,
             self.gcs_prefix + "/",
-            chunk_size_mb=self.cfg["gcp"]["gcs"].get("upload_chunk_size_mb"),
+            chunk_size_mib=self.cfg["gcp"]["gcs"].get("upload_chunk_size_mib"),
         )
 
     def copy_files_at_cloud(self, files_to_copy):
