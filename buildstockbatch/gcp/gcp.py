@@ -33,6 +33,7 @@ import logging
 import os
 import pathlib
 import re
+import requests
 import shutil
 import tarfile
 import time
@@ -72,19 +73,27 @@ def upload_directory_to_GCS(local_directory, bucket, prefix, chunk_size_mb=None)
             local_filepath = pathlib.Path(dirpath, filename)
             string_paths.append(str(local_filepath.relative_to(local_dir_abs)))
 
-    transfer_manager.upload_many_from_filenames(
-        bucket,
-        string_paths,
-        source_directory=local_dir_abs,
-        blob_name_prefix=prefix,
-        raise_exception=True,
-        # Default chunk size is 40 MB
-        blob_constructor_kwargs={
-            "chunk_size": chunk_size_mb * 1024 * 1024,
-        }
-        if chunk_size_mb
-        else None,
-    )
+    try:
+        transfer_manager.upload_many_from_filenames(
+            bucket,
+            string_paths,
+            source_directory=local_dir_abs,
+            blob_name_prefix=prefix,
+            raise_exception=True,
+            # Default chunk size is 40 MB
+            blob_constructor_kwargs={
+                "chunk_size": chunk_size_mb * 1024 * 1024,
+            }
+            if chunk_size_mb
+            else None,
+        )
+    except requests.exceptions.ConnectionError:
+        logger.error("Error while uploading files to GCS bucket.")
+        logger.error(
+            "For timeout errors, consider decreasing gcp.gcs.upload_chunk_size_mb. "
+            f"(Currently {chunk_size_mb or 40} MB)"
+        )
+        raise
 
 
 def copy_GCS_file(src_bucket, src_name, dest_bucket, dest_name):
