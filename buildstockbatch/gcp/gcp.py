@@ -87,13 +87,11 @@ def upload_directory_to_GCS(local_directory, bucket, prefix, chunk_size_mib=None
             if chunk_size_mib
             else None,
         )
-    except requests.exceptions.ConnectionError:
-        logger.error("Error while uploading files to GCS bucket.")
-        logger.error(
-            "For timeout errors, consider decreasing gcp.gcs.upload_chunk_size_mib. "
-            f"(Currently {chunk_size_mib or 40} MiB)"
-        )
-        raise
+    except requests.exceptions.ConnectionError as e:
+        raise requests.exceptions.ConnectionError(
+            "Error while uploading files to GCS bucket. For timeout errors, "
+            f"consider decreasing gcp.gcs.upload_chunk_size_mib. (Currently {chunk_size_mib or 40} MiB)"
+        ) from e
 
 
 def copy_GCS_file(src_bucket, src_name, dest_bucket, dest_name):
