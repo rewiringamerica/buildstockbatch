@@ -335,7 +335,7 @@ class DockerBatchBase(BuildStockBatchBase):
             baseline_sims = zip(building_ids, itertools.repeat(None))
             all_sims = list(itertools.chain(baseline_sims, upgrade_sims))
         else:
-            all_sims = list(itertools.chain(upgrade_sims))
+            all_sims = list(upgrade_sims)
         random.shuffle(all_sims)
         all_sims_iter = iter(all_sims)
 
