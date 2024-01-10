@@ -302,7 +302,8 @@ using `GCP Batch <https://cloud.google.com/batch>`_ and `Cloud Run <https://clou
        large the boot disk will be (see the `Batch OS environment docs`_ for details) of the
        machine(s) running simulations (which is the disk used by simulations). This will likely need
        to be set to at least 2,048 if more than 8 simulations will be run in parallel on the same
-       machine (i.e., when vCPUs per machine_type ÷ vCPUs per sim > 8). Default: None.
+       machine (i.e., when vCPUs per machine_type ÷ vCPUs per sim > 8). Default: None (which should
+       result in a 30 GB boot disk according to the docs linked above).
     *  ``machine_type``: GCP Compute Engine machine type to use. If omitted, GCP Batch will
        choose a machine type based on the requested vCPUs and memory. If set, the machine type
        should have at least as many resources as requested for each simulation above. If it is
