@@ -550,10 +550,10 @@ class GcpBatch(DockerBatchBase):
         logger.info("Setting up GCP Batch job")
         client = batch_v1.BatchServiceClient()
 
-        runnable = batch_v1.Runnable()
-        runnable.container = batch_v1.Runnable.Container()
-        runnable.container.image_uri = self.repository_uri + ":" + self.job_identifier
-        runnable.container.entrypoint = "/bin/sh"
+        bsb_runnable = batch_v1.Runnable()
+        bsb_runnable.container = batch_v1.Runnable.Container()
+        bsb_runnable.container.image_uri = self.repository_uri + ":" + self.job_identifier
+        bsb_runnable.container.entrypoint = "/bin/sh"
 
         # Pass environment variables to each task
         environment = batch_v1.Environment()
@@ -563,13 +563,16 @@ class GcpBatch(DockerBatchBase):
             "GCS_PREFIX": self.gcs_prefix,
             "GCS_BUCKET": self.gcs_bucket,
         }
-        runnable.environment = environment
+        bsb_runnable.environment = environment
 
-        runnable.container.commands = ["-c", "python3 -m buildstockbatch.gcp.gcp"]
+        bsb_runnable.container.commands = ["-c", "python3 -m buildstockbatch.gcp.gcp"]
 
-        prune = batch_v1.Runnable()
-        prune.script = batch_v1.Runnable.Script()
-        prune.script.text = "docker system prune --volumes -f"
+        cleanup_runnable = batch_v1.Runnable()
+        cleanup_runnable.script = batch_v1.Runnable.Script()
+        # Prune old docker containers after we're done using them, so they don't use up all the disk space.
+        # "until=2m" - Ignore containers that were just created and aren't active yet.
+        # "|| true" - This can fail if another task is pruning at the same time, but these failures are safe to ignore.
+        cleanup_runnable.script.text = 'docker system prune -f --filter "until=2m" || true'
 
         gcp_cfg = self.cfg["gcp"]
         job_env_cfg = gcp_cfg.get("job_environment", {})
@@ -581,7 +584,7 @@ class GcpBatch(DockerBatchBase):
         # Give three minutes per simulation, plus ten minutes for job overhead
         task_duration_secs = 60 * (10 + batch_info.n_sims_per_job * 3)
         task = batch_v1.TaskSpec(
-            runnables=[runnable, prune],
+            runnables=[bsb_runnable, cleanup_runnable],
             compute_resource=resources,
             # Allow retries, but only when the machine is preempted.
             max_retry_count=3,
