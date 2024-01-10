@@ -4,6 +4,7 @@ import gzip
 import json
 import os
 import pathlib
+import pytest
 import shutil
 import tarfile
 import tempfile
@@ -19,9 +20,11 @@ resources_dir = os.path.join(here, "test_inputs", "test_openstudio_buildstock", 
 
 
 @docker_available
-def test_skip_baseline_sims_false(basic_residential_project_file, mocker):
-    """Test that no "skip_sims" baseline configuration does not skip baseline sims."""
-    project_filename, results_dir = basic_residential_project_file()
+@pytest.mark.parametrize("skip_baseline_sims,expected", [(False, 10), (True, 5)])
+def test_skip_baseline_sims(basic_residential_project_file, mocker, skip_baseline_sims, expected):
+    """Test "skip_sims" baseline configuration's effect on ``n_sims``"""
+    update_args = {"baseline": {"skip_sims": True}} if skip_baseline_sims else {}
+    project_filename, results_dir = basic_residential_project_file(update_args)
 
     mocker.patch.object(DockerBatchBase, "results_dir", results_dir)
     sampler_property_mock = mocker.patch.object(DockerBatchBase, "sampler", new_callable=PropertyMock)
@@ -36,32 +39,7 @@ def test_skip_baseline_sims_false(basic_residential_project_file, mocker):
 
     with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir:
         _, batch_info = dbb._run_batch_prep(pathlib.Path(tmpdir))
-
-        assert batch_info.n_sims == 10
-
-
-@docker_available
-def test_skip_baseline_sims_true(basic_residential_project_file, mocker):
-    """Test that ``skip_sims: true`` baseline configuration skips baseline sims."""
-    project_filename, results_dir = basic_residential_project_file({"baseline": {"skip_sims": True}})
-
-    mocker.patch.object(DockerBatchBase, "results_dir", results_dir)
-    sampler_property_mock = mocker.patch.object(DockerBatchBase, "sampler", new_callable=PropertyMock)
-    sampler_mock = mocker.MagicMock()
-    sampler_property_mock.return_value = sampler_mock
-    # Hard-coded sampling output includes 5 buildings.
-    sampler_mock.run_sampling = MagicMock(return_value=os.path.join(resources_dir, "buildstock_good.csv"))
-
-    dbb = DockerBatchBase(project_filename)
-    dbb.batch_array_size = 3
-    DockerBatchBase.validate_project = MagicMock(return_value=True)
-
-    print(f"dbb.skip_baseline_sims={dbb.skip_baseline_sims}")
-
-    with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir:
-        _, batch_info = dbb._run_batch_prep(pathlib.Path(tmpdir))
-
-        assert batch_info.n_sims == 5
+        assert batch_info.n_sims == expected
 
 
 @docker_available
