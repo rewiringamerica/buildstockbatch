@@ -567,6 +567,10 @@ class GcpBatch(DockerBatchBase):
 
         runnable.container.commands = ["-c", "python3 -m buildstockbatch.gcp.gcp"]
 
+        prune = batch_v1.Runnable()
+        prune.script = batch_v1.Runnable.Script()
+        prune.script.text = "docker system prune --volumes -f"
+
         gcp_cfg = self.cfg["gcp"]
         job_env_cfg = gcp_cfg.get("job_environment", {})
         resources = batch_v1.ComputeResource(
@@ -577,7 +581,7 @@ class GcpBatch(DockerBatchBase):
         # Give three minutes per simulation, plus ten minutes for job overhead
         task_duration_secs = 60 * (10 + batch_info.n_sims_per_job * 3)
         task = batch_v1.TaskSpec(
-            runnables=[runnable],
+            runnables=[runnable, prune],
             compute_resource=resources,
             # Allow retries, but only when the machine is preempted.
             max_retry_count=3,
