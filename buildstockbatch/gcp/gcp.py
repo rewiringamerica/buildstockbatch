@@ -546,6 +546,22 @@ class GcpBatch(DockerBatchBase):
 
     def start_batch_job(self, batch_info):
         """Implements :func:`DockerBase.start_batch_job`"""
+        # Make sure the default subnet for this region has access to Google APIs when external IP addresses are blocked.
+        subnet_client = compute_v1.SubnetworksClient()
+        op = subnet_client.set_private_ip_google_access(
+            project=self.gcp_project,
+            region=self.region,
+            subnetwork="default",
+            subnetworks_set_private_ip_google_access_request_resource=compute_v1.SubnetworksSetPrivateIpGoogleAccessRequest(  # noqa
+                private_ip_google_access=True
+            ),
+        )
+        op.result()
+        if op.error_code:
+            logger.error(
+                f"Error ({op.error_code}) updating subnet settings to allow private Google access: {op.error_message}"
+            )
+
         # Define and run the GCP Batch job.
         logger.info("Setting up GCP Batch job")
         client = batch_v1.BatchServiceClient()
@@ -610,16 +626,6 @@ class GcpBatch(DockerBatchBase):
             ),
         )
         instances = batch_v1.AllocationPolicy.InstancePolicyOrTemplate(policy=policy)
-        # Make sure the default subnet for this region has access to Google APIs when external IP addresses are blocked.
-        subnet_client = compute_v1.SubnetworksClient()
-        subnet_client.set_private_ip_google_access(
-            project=self.gcp_project,
-            region=self.region,
-            subnetwork="default",
-            subnetworks_set_private_ip_google_access_request_resource=compute_v1.SubnetworksSetPrivateIpGoogleAccessRequest(  # noqa
-                private_ip_google_access=True
-            ),
-        )
         allocation_policy = batch_v1.AllocationPolicy(
             instances=[instances],
             network=batch_v1.AllocationPolicy.NetworkPolicy(
