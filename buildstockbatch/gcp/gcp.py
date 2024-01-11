@@ -33,6 +33,7 @@ import logging
 import os
 import pathlib
 import re
+import requests
 import shutil
 import tarfile
 import time
@@ -58,7 +59,7 @@ from buildstockbatch.utils import (
 logger = logging.getLogger(__name__)
 
 
-def upload_directory_to_GCS(local_directory, bucket, prefix):
+def upload_directory_to_GCS(local_directory, bucket, prefix, chunk_size_mib=None):
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket)
 
@@ -72,13 +73,25 @@ def upload_directory_to_GCS(local_directory, bucket, prefix):
             local_filepath = pathlib.Path(dirpath, filename)
             string_paths.append(str(local_filepath.relative_to(local_dir_abs)))
 
-    transfer_manager.upload_many_from_filenames(
-        bucket,
-        string_paths,
-        source_directory=local_dir_abs,
-        blob_name_prefix=prefix,
-        raise_exception=True,
-    )
+    try:
+        transfer_manager.upload_many_from_filenames(
+            bucket,
+            string_paths,
+            source_directory=local_dir_abs,
+            blob_name_prefix=prefix,
+            raise_exception=True,
+            # Default chunk size is 40 MiB
+            blob_constructor_kwargs={
+                "chunk_size": chunk_size_mib * 1024 * 1024,
+            }
+            if chunk_size_mib
+            else None,
+        )
+    except requests.exceptions.ConnectionError as e:
+        raise requests.exceptions.ConnectionError(
+            "Error while uploading files to GCS bucket. For timeout errors, "
+            f"consider decreasing gcp.gcs.upload_chunk_size_mib. (Currently {chunk_size_mib or 40} MiB)"
+        ) from e
 
 
 def copy_GCS_file(src_bucket, src_name, dest_bucket, dest_name):
@@ -529,7 +542,12 @@ class GcpBatch(DockerBatchBase):
     def upload_batch_files_to_cloud(self, tmppath):
         """Implements :func:`DockerBase.upload_batch_files_to_cloud`"""
         logger.info("Uploading Batch files to Cloud Storage")
-        upload_directory_to_GCS(tmppath, self.gcs_bucket, self.gcs_prefix + "/")
+        upload_directory_to_GCS(
+            tmppath,
+            self.gcs_bucket,
+            self.gcs_prefix + "/",
+            chunk_size_mib=self.cfg["gcp"]["gcs"].get("upload_chunk_size_mib"),
+        )
 
     def copy_files_at_cloud(self, files_to_copy):
         """Implements :func:`DockerBase.copy_files_at_cloud`"""
@@ -548,12 +566,15 @@ class GcpBatch(DockerBatchBase):
         """Implements :func:`DockerBase.start_batch_job`"""
         # Define and run the GCP Batch job.
         logger.info("Setting up GCP Batch job")
+        labels = {"bsb_job_identifier": self.job_identifier}
+
         client = batch_v1.BatchServiceClient()
 
         bsb_runnable = batch_v1.Runnable()
         bsb_runnable.container = batch_v1.Runnable.Container()
         bsb_runnable.container.image_uri = self.repository_uri + ":" + self.job_identifier
         bsb_runnable.container.entrypoint = "/bin/sh"
+        bsb_runnable.labels = labels
 
         # Pass environment variables to each task
         environment = batch_v1.Environment()
@@ -573,6 +594,7 @@ class GcpBatch(DockerBatchBase):
         # "until=2m" - Ignore containers that were just created and aren't active yet.
         # "|| true" - This can fail if another task is pruning at the same time, but these failures are safe to ignore.
         cleanup_runnable.script.text = 'docker system prune -f --filter "until=2m" || true'
+        cleanup_runnable.labels = labels
 
         gcp_cfg = self.cfg["gcp"]
         job_env_cfg = gcp_cfg.get("job_environment", {})
@@ -617,7 +639,10 @@ class GcpBatch(DockerBatchBase):
             ),
         )
         instances = batch_v1.AllocationPolicy.InstancePolicyOrTemplate(policy=policy)
-        allocation_policy = batch_v1.AllocationPolicy(instances=[instances])
+        allocation_policy = batch_v1.AllocationPolicy(
+            instances=[instances],
+            labels=labels,
+        )
         if service_account := gcp_cfg.get("service_account"):
             allocation_policy.service_account = batch_v1.ServiceAccount(email=service_account)
 
@@ -627,9 +652,7 @@ class GcpBatch(DockerBatchBase):
         job.allocation_policy = allocation_policy
         job.logs_policy = batch_v1.LogsPolicy()
         job.logs_policy.destination = batch_v1.LogsPolicy.Destination.CLOUD_LOGGING
-        job.labels = {
-            "bsb_job_identifier": self.job_identifier,
-        }
+        job.labels = labels
 
         create_request = batch_v1.CreateJobRequest()
         create_request.job = job
