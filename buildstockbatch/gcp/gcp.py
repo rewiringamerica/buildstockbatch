@@ -567,9 +567,9 @@ class GcpBatch(DockerBatchBase):
 
         bsb_runnable.container.commands = ["-c", "python3 -m buildstockbatch.gcp.gcp"]
 
+        # Prune old docker containers after we're done using them, so they don't use up all the disk space.
         cleanup_runnable = batch_v1.Runnable()
         cleanup_runnable.script = batch_v1.Runnable.Script()
-        # Prune old docker containers after we're done using them, so they don't use up all the disk space.
         # "until=2m" - Ignore containers that were just created and aren't active yet.
         # "|| true" - This can fail if another task is pruning at the same time, but these failures are safe to ignore.
         cleanup_runnable.script.text = 'docker system prune -f --filter "until=2m" || true'
