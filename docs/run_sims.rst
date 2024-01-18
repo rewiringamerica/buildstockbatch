@@ -126,7 +126,7 @@ tool.
 The first time you run ``buildstock_gcp`` it may take several minutes,
 especially over a slower internet connection as it is downloading and building a docker image.
 
-GCP Specific Project configuration
+GCP specific project configuration
 ..................................
 
 For the project to run on GCP, you will need to add a ``gcp`` section to your config
@@ -139,9 +139,9 @@ file, something like this:
       project: myorg_project
       region: us-central1
       artifact_registry:
-        repository: buildstockbatch
+        repository: buildstockbatch-docker
       gcs:
-        bucket: mybucket
+        bucket: buildstockbatch
         prefix: national01_run01
       use_spot: true
       batch_array_size: 10000
@@ -154,12 +154,20 @@ You can optionally override the ``job_identifier`` from the command line
 quickly assign a new ID with each run without updating the config file.
 
 
-List existing jobs
+Show existing jobs
 ..................
 
 Run ``buildstock_gcp your_project_file.yml [job_identifier] --show_jobs`` to see the existing
 jobs matching the project specified. This can show you whether a previously-started job
 has completed, is still running, or has already been cleaned up.
+
+
+Post-processing only
+.....................
+
+If ``buildstock_gcp`` is interrupted after the simulations are kicked off (i.e. the Batch job is
+running), the simulations will finish, but post-processing will not be started. You can run only
+the post-processing steps later with the ``--postprocessonly`` flag.
 
 
 Cleaning up after yourself
@@ -169,3 +177,10 @@ When the simulations and postprocessing are complete, run ``buildstock_gcp
 your_project_file.yml [job_identifier] --clean``. This will clean up all the GCP resources that
 were created to run the specified project, other than files in Cloud Storage. If the project is
 still running, it will be cancelled. Your output files will still be available in GCS.
+
+You can clean up files in Cloud Storage from the `GCP Console`_.
+
+If you make changes to the package between runs, you may also want to clean up the docker images
+created each time, with ``docker image prune``.
+
+.. _GCP Console: https://console.cloud.google.com/storage/browser
