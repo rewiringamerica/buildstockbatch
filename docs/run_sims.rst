@@ -117,8 +117,7 @@ on S3 and queryable in Athena.
 Google Cloud Platform
 ~~~~~~~~~~~~~~~~~~~~~
 
-Running a batch on GCP is done by calling the ``buildstock_gcp`` command line
-tool.
+Run a project on GCP by calling the ``buildstock_gcp`` command line tool.
 
 .. command-output:: buildstock_gcp --help
    :ellipsis: 0,8
@@ -136,6 +135,7 @@ file, something like this:
 
     gcp:
       job_identifier: national01
+      # The project, Artifact Registry repo, and GCS bucket must already exist.
       project: myorg_project
       region: us-central1
       artifact_registry:
@@ -180,7 +180,7 @@ still running, it will be cancelled. Your output files will still be available i
 
 You can clean up files in Cloud Storage from the `GCP Console`_.
 
-If you make changes to the package between runs, you may also want to clean up the docker images
-created each time, with ``docker image prune``.
+If you make code changes between runs, you may want to occasionally clean up the docker
+images created for each run with ``docker image prune``.
 
 .. _GCP Console: https://console.cloud.google.com/storage/browser
