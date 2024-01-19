@@ -314,7 +314,7 @@ using `GCP Batch <https://cloud.google.com/batch>`_ and `Cloud Run <https://clou
        large enough, multiple simulations will be run in parallel on the same machine. Usually safe
        to leave unset.
     *  ``use_spot``: Optional. Whether to use `Spot VMs <https://cloud.google.com/spot-vms>`_
-      for data simulations, which can reduce costs by up to 91%. Default: false
+       for data simulations, which can reduce costs by up to 91%. Default: false
 *  ``postprocessing_environment``: Optional. Specifies the Cloud Run computing environment for
    postprocessing.
 
