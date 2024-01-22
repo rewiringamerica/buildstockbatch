@@ -10,13 +10,18 @@ Buildstock Batch runs on GCP in a few phases:
     - Run sampling and split the generated buildings + upgrades into batches.
     - Collect all the required input files (including downloading weather files)
       and upload them to a Cloud Storage bucket.
-    - Kick off the Batch and Cloud Run jobs (described below), and wait for them to finish.
+    - Create and start the Batch and Cloud Run jobs (described below),
+      and wait for them to finish.
 
   * In GCP Batch
-    - Run a job where each task runs one batch of simulations.
+    - Run a batch job where each task runs a small group of simulations.
       GCP Batch uses the Docker image to run OpenStudio on Compute Engine VMs.
     - Raw output files are written to the bucket in Cloud Storage.
 
   * In Cloud Run
     - Run a job for post-processing steps. Also uses the Docker image.
     - Aggregated output files are written to the bucket in Cloud Storage.
+
+
+`gcp.py` also supports validating a project file, cleaning up old projects,
+and viewing the state of existing jobs.
