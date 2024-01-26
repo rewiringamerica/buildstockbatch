@@ -285,6 +285,7 @@ One-time GCP setup that can be shared by multiple users.
 
 
 .. _per-user-gcp:
+
 Per-user setup
 ..............
 One-time setup that each user needs to do on the workstation from which they'll launch and
