@@ -691,7 +691,7 @@ Job name:
 Job UID:
     {created_job.uid}
 🔗 See status at:
-    {job_url}.
+    {job_url}
 Results output browser (Cloud Console):
     https://console.cloud.google.com/storage/browser/{self.gcs_bucket}/{self.gcs_prefix}/results/simulation_output
 """
@@ -932,7 +932,7 @@ Results output browser (Cloud Console):
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 🔗 See status at:
-    {self.postprocessing_job_console_url}.
+    {self.postprocessing_job_console_url}
 Results output browser (Cloud Console):
     https://console.cloud.google.com/storage/browser/{self.gcs_bucket}/{self.gcs_prefix}/results/
 
