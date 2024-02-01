@@ -911,7 +911,7 @@ Results output browser (Cloud Console):
         # Create the job
         jobs_client = run_v2.JobsClient()
         op = jobs_client.create_job(
-            run_v2.CreateJobRequest(
+            request=run_v2.CreateJobRequest(
                 parent=f"projects/{self.gcp_project}/locations/{self.region}",
                 job_id=self.postprocessing_job_id,
                 job=job,
