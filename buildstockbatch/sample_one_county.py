@@ -151,7 +151,7 @@ class SampleOnly:
             # Copy output to non-temp dir
             shutil.copy(
                 os.path.join(temp_housing_characteristics_dir, "buildstock.csv"),
-                os.path.join(self.output_dir, f"buildstock_{county}_{PUMA}.csv"),
+                os.path.join(self.output_dir, f"buildstock_{county}_{PUMA}_{n_samples}.csv"),
             )
 
 
@@ -159,7 +159,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("county")
     parser.add_argument("PUMA")
-    parser.add_argument("n_samples", type=int)
+    parser.add_argument("n_samples")  # comma-separated list of sample sizes to generate
     # TODO: create dir if needed
     parser.add_argument("output_dir", default=".", nargs="?")
     args = parser.parse_args()
@@ -171,8 +171,11 @@ def main():
 
     # county = "G1900030"  # IA
     # PUMA = "G19001800"
+
+    sample_sizes = [int(i) for i in args.n_samples.split(",")]
     s = SampleOnly(args.output_dir)
-    s.run_sampler(args.county, args.PUMA, args.n_samples)
+    for i in sample_sizes:
+        s.run_sampler(args.county, args.PUMA, i)
 
 
 if __name__ == "__main__":
