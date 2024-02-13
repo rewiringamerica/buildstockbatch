@@ -1,18 +1,25 @@
 """Create a sample of buildings (buildstock.csv) for a single county+PUMA.
 
+Usage:
+    python3 sample_one_county.py --help
+
+    python3 sample_one_county.py G1900030 G19001800 100,200 path/to/resstock path/to/output_dir/
+
+        - Generates two files where every building has county=G1900030 and PUMA=G19001800:
+            path/to/output_dir/buildstock_G1900030_G19001800_100.csv with 100 samples
+            path/to/output_dir/buildstock_G1900030_G19001800_200.csv with 200 samples
+
 Methodology:
+    This modifies the conditional probability distributions from the standard ResStock national project
+    to filter the sample to a single county+PUMA.
 
-This modifies the conditional probability distributions from the standard ResStock national project
-to filter the sample to a single county+PUMA.
+    To do this, we modify two files:
+    - ASHRAE IECC Climate Zone 2004.tsv
+    - Make 100% of the samples fall into the climate zone of the selected location.
+    - County and PUMA.tsv
+    - Make 100% of samples (within the chosen climate zone) fall into the selected county + PUMA
 
-To do this, we modify two files:
- - ASHRAE IECC Climate Zone 2004.tsv
-   - Make 100% of the samples fall into the climate zone of the selected location.
- - County and PUMA.tsv
-   - Make 100% of samples (within the chosen climate zone) fall into the selected county + PUMA
-
-All other variables are downstream or these (or aren't dependent on them).
-
+    All other variables are downstream or these (or aren't dependent on them).
 
 Assumptions:
     This logic is only guaranteed to work for the current ResStock national project. Other changes
@@ -20,8 +27,8 @@ Assumptions:
 
     In particular, this code assumes:
         - ASHRAE climate zone has no dependencies
-        - County and Puma depends only on the ASHRAE climate zone
-        - Each County+Puma fall entirely in one climate zone
+        - County and PUMA depends only on the ASHRAE climate zone
+        - Each County+PUMA fall entirely in one climate zone
 """
 import argparse
 import csv
@@ -36,16 +43,16 @@ from sampler import residential_quota
 class SampleOnly:
     CONTAINER_RUNTIME = ContainerRuntime.DOCKER
 
-    def __init__(self, output_dir):
+    def __init__(self, buildstock_dir, output_dir):
         # Sampler uses this to find the sampling scripts
-        self.buildstock_dir = "/usr/local/google/home/nweires/RewiringAmerica/resstock"
-        # ResStock national project
-        # Could use a different project, but `County and PUMA.tsv` and `ASHRAE IECC Climate Zone 2004.tsv`
-        # must exist in the expected format.
-        self.resstock_dir = "/usr/local/google/home/nweires/RewiringAmerica/resstock/project_national"
+        self.buildstock_dir = os.path.abspath(buildstock_dir)
+        # ResStock national project. Could use a different project, but `County and PUMA.tsv` and
+        # `ASHRAE IECC Climate Zone 2004.tsv` must exist in the expected format.
+        self.resstock_dir = os.path.join(self.buildstock_dir, "project_national")
         # Directory containing the conditional probability distributions we plan to modify
         self.housing_characteristics_dir = os.path.join(self.resstock_dir, "housing_characteristics")
         self.output_dir = output_dir
+        os.makedirs(output_dir, exist_ok=True)
 
     @property
     def docker_image(self):
@@ -57,7 +64,7 @@ class SampleOnly:
 
     @property
     def project_filename(self):
-        """Sampler expects this to exist, but doesn't need it."""
+        """Sampler expects this property to exist, but it can be None."""
         return None
 
     def get_climate_zone(self, county, PUMA):
@@ -88,10 +95,8 @@ class SampleOnly:
             PUMA: geoid of PUMA
             n_samples: Number of building samples to produce.
         """
-        # TODO: validate format of these
 
         climate_zone = self.get_climate_zone(county, PUMA)
-        print(f"found climate zone: {climate_zone}")
         # Create a new copy of the probability distribution TSV files, so we can
         # make some changes to them.
         with tempfile.TemporaryDirectory(prefix="sampling_", dir=self.buildstock_dir) as tmpdir:
@@ -159,22 +164,25 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("county")
     parser.add_argument("PUMA")
-    parser.add_argument("n_samples")  # comma-separated list of sample sizes to generate
-    # TODO: create dir if needed
-    parser.add_argument("output_dir", default=".", nargs="?")
+    parser.add_argument("n_samples", help="comma-separated list of samples sizes to generate")
+    parser.add_argument("buildstock_dir", help="Path of the ResStock directory (expected to contain project_national)")
+    parser.add_argument(
+        "output_dir",
+        default=".",
+        nargs="?",
+        help="Optional path where output should be written. Defaults to the current directory.",
+    )
     args = parser.parse_args()
 
-    # output_dir = "."
-
-    # county = "G0400010"  # AL
-    # PUMA = "G04000300"
-
-    # county = "G1900030"  # IA
-    # PUMA = "G19001800"
+    assert (
+        len(args.county) == 8 and args.county[0] == "G"
+    ), "County should be 8 chars and start with G (e.g. 'G0100010')"
+    assert len(args.PUMA) == 9 and args.PUMA[0] == "G", "PUMA should be 9 chars and start with G (e.g. 'G01002100')"
 
     sample_sizes = [int(i) for i in args.n_samples.split(",")]
-    s = SampleOnly(args.output_dir)
+    s = SampleOnly(args.buildstock_dir, args.output_dir)
     for i in sample_sizes:
+        print(f"Creating {i} samples...")
         s.run_sampler(args.county, args.PUMA, i)
 
 
