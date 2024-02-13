@@ -191,12 +191,11 @@ class GcpBatch(DockerBatchBase):
         return f"projects/{gcp_project}/locations/{region}/repositories/{repo}"
 
     def check_output_dir(self):
-        """Check for existing files in the output directory."""
+        """Check for existing results files in the output directory."""
         if self.missing_only:
             return
-        cfg = self.cfg
         storage_client = storage.Client(project=self.gcp_project)
-        output_dir = os.path.join(cfg["gcp"]["gcs"]["prefix"], "results", "simulation_output")
+        output_dir = os.path.join(self.cfg["gcp"]["gcs"]["prefix"], "results", "simulation_output")
         bucket = storage_client.bucket(self.gcs_bucket)
         blobs = bucket.list_blobs(prefix=os.path.join(output_dir, "results_job"))
 
@@ -205,7 +204,7 @@ class GcpBatch(DockerBatchBase):
         except StopIteration:
             return
 
-        prefix_for_deletion = cfg["gcp"]["gcs"]["prefix"]
+        prefix_for_deletion = self.cfg["gcp"]["gcs"]["prefix"]
         blobs_for_deletion = bucket.list_blobs(prefix=prefix_for_deletion)
         user_choice = (
             input(
@@ -217,19 +216,21 @@ class GcpBatch(DockerBatchBase):
         )
 
         if user_choice == "yes":
-            print("Deleting files...")
+            logger.info("Deleting files...")
             try:
                 blobs_for_deletion_object = [blob for blob in blobs_for_deletion]
                 bucket.delete_blobs(blobs_for_deletion_object)
             except Exception as e:
-                print(f"Failed to delete files: {e}")
+                logger.error(f"Failed to delete files: {e}")
 
             # Confirm deletion
             remaining_blobs = list(bucket.list_blobs(prefix=prefix_for_deletion))
             if not remaining_blobs:
-                print("All specified files have been confirmed deleted. You can now proceed with your operation.")
+                logger.info("All specified files have been confirmed deleted. You can now proceed with your operation.")
             else:
-                print("Deletion confirmed for some files, but some still remain. Please check GCS for details.")
+                logger.warning(
+                    "Deletion confirmed for some files, but some still remain. Please check GCS for details."
+                )
         elif user_choice == "no":
             raise ValidationError(
                 f"Output files are already present in bucket {self.gcs_bucket}! For example, {blob.name} exists. "
