@@ -192,8 +192,6 @@ class GcpBatch(DockerBatchBase):
 
     def check_output_dir(self):
         """Check for existing results files in the output directory."""
-        if self.missing_only:
-            return
         storage_client = storage.Client(project=self.gcp_project)
         output_dir = os.path.join(self.cfg["gcp"]["gcs"]["prefix"], "results", "simulation_output")
         bucket = storage_client.bucket(self.gcs_bucket)
@@ -209,7 +207,7 @@ class GcpBatch(DockerBatchBase):
         user_choice = (
             input(
                 f"Output files are already present in bucket {self.gcs_bucket}! For example, {blob.name} exists. "
-                f"Do you want to delete all the files in {prefix_for_deletion}? (yes/no): "
+                f"Do you want to permanently delete all the files in {prefix_for_deletion}? (yes/no): "
             )
             .strip()
             .lower()
@@ -1255,7 +1253,8 @@ def main():
         else:
             if batch.check_for_existing_jobs():
                 return
-            batch.check_output_dir()
+            if not args.missingonly:
+                batch.check_output_dir()
 
             batch.build_image()
             batch.push_image()
