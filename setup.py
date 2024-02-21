@@ -42,13 +42,6 @@ setuptools.setup(
         "awsretry",
         "lxml",
         "semver",
-        "gcsfs",
-        "google-cloud-artifact-registry",
-        "google-cloud-batch",
-        "google-cloud-compute",
-        "google-cloud-run",
-        "google-cloud-storage",
-        "tqdm",
     ],
     extras_require={
         "dev": [
@@ -67,7 +60,16 @@ setuptools.setup(
             "rope",
             "doc8",
             "pre-commit",
-        ]
+        ],
+        "gcp": [
+            "gcsfs",
+            "google-cloud-artifact-registry",
+            "google-cloud-batch",
+            "google-cloud-compute",
+            "google-cloud-run",
+            "google-cloud-storage",
+            "tqdm",
+        ],
     },
     entry_points={
         "console_scripts": [
