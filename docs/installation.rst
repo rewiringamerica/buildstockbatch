@@ -295,6 +295,7 @@ manage BuildStockBatch runs.
 2. Get BuildStockBatch and set up a Python environment for it using the :ref:`python` instructions
    above. (i.e., create a Python virtual environment, activate the venv, and install buildstockbatch
    with the command below.)
+
    * Install with the ``[gcp]`` option to include GCP-specific dependencies:
 
     ::
