@@ -1,6 +1,6 @@
 ARG OS_VER
 FROM --platform=linux/amd64 nrel/openstudio:$OS_VER as buildstockbatch
-ARG CLOUD_PLATFORM
+ARG CLOUD_PLATFORM=aws
 
 RUN sudo apt update && sudo apt install -y python3-pip
 RUN sudo -H pip install --upgrade pip
