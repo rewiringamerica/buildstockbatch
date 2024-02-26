@@ -73,6 +73,7 @@ setuptools.setup(
         ]
         + gcp_requires,
         "gcp": gcp_requires,
+        "aws": [],
     },
     entry_points={
         "console_scripts": [
