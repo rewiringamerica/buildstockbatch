@@ -14,6 +14,16 @@ with open(os.path.join(here, "buildstockbatch", "__version__.py"), "r", encoding
 with open("README.md", "r", "utf-8") as f:
     readme = f.read()
 
+gcp_requires = [
+    "gcsfs",
+    "google-cloud-artifact-registry",
+    "google-cloud-batch",
+    "google-cloud-compute",
+    "google-cloud-run",
+    "google-cloud-storage",
+    "tqdm",
+]
+
 setuptools.setup(
     name=metadata["__title__"],
     version=metadata["__version__"],
@@ -60,16 +70,9 @@ setuptools.setup(
             "rope",
             "doc8",
             "pre-commit",
-        ],
-        "gcp": [
-            "gcsfs",
-            "google-cloud-artifact-registry",
-            "google-cloud-batch",
-            "google-cloud-compute",
-            "google-cloud-run",
-            "google-cloud-storage",
-            "tqdm",
-        ],
+        ]
+        + gcp_requires,
+        "gcp": gcp_requires,
     },
     entry_points={
         "console_scripts": [
