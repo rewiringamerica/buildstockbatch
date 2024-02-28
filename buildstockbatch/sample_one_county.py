@@ -3,7 +3,7 @@
 Usage:
     python3 sample_one_county.py --help
 
-    python3 sample_one_county.py G1900030 G19001800 100,200 path/to/resstock path/to/output_dir/
+    python3 sample_one_county.py G1900030 G19001800 100,200 path/to/resstock path/to/output_dir
 
         - Generates two files where every building has county=G1900030 and PUMA=G19001800:
             path/to/output_dir/buildstock_G1900030_G19001800_100.csv with 100 samples
@@ -15,11 +15,11 @@ Methodology:
 
     To do this, we modify two files:
     - ASHRAE IECC Climate Zone 2004.tsv
-    - Make 100% of the samples fall into the climate zone of the selected location.
+        - Make 100% of the samples fall into the climate zone of the selected location.
     - County and PUMA.tsv
-    - Make 100% of samples (within the chosen climate zone) fall into the selected county + PUMA
+        - Make 100% of samples (within the chosen climate zone) fall into the selected county + PUMA
 
-    All other variables are downstream or these (or aren't dependent on them).
+    All other variables are downstream of these (or don't depend on them).
 
 Assumptions:
     This logic is only guaranteed to work for the current ResStock national project. Other changes
@@ -46,11 +46,13 @@ class SampleOnly:
     def __init__(self, buildstock_dir, output_dir):
         # Sampler uses this to find the sampling scripts
         self.buildstock_dir = os.path.abspath(buildstock_dir)
+
         # ResStock national project. Could use a different project, but `County and PUMA.tsv` and
         # `ASHRAE IECC Climate Zone 2004.tsv` must exist in the expected format.
-        self.resstock_dir = os.path.join(self.buildstock_dir, "project_national")
+        self.project_dir = os.path.join(self.buildstock_dir, "project_national")
+
         # Directory containing the conditional probability distributions we plan to modify
-        self.housing_characteristics_dir = os.path.join(self.resstock_dir, "housing_characteristics")
+        self.housing_characteristics_dir = os.path.join(self.project_dir, "housing_characteristics")
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
@@ -72,12 +74,18 @@ class SampleOnly:
         with open(os.path.join(self.housing_characteristics_dir, "County and PUMA.tsv")) as f:
             reader = csv.reader(f, delimiter="\t")
             headers = next(reader)
-            location_col = headers.index(f"Option={county}, {PUMA}")
+            # Index of the column with the county and PUMA we're looking for.
+            try:
+                location_col = headers.index(f"Option={county}, {PUMA}")
+            except ValueError as e:
+                raise ValueError(f"Could not find 'Option={county}, {PUMA}' column in 'County and PUMA.tsv'") from e
 
             zone = None
             for row in reader:
+                # Skip comments
                 if row[0].strip()[0] == "#":
                     continue
+
                 # Find the zone with a non-zero chance of producing this county + PUMA
                 if row[location_col] != "0":
                     if zone:
@@ -91,14 +99,14 @@ class SampleOnly:
     def run_sampler(self, county, PUMA, n_samples):
         """
         Args:
-            county: geoid of county
-            PUMA: geoid of PUMA
+            county: GISJOIN ID of county
+            PUMA: GISJOIN ID of PUMA
             n_samples: Number of building samples to produce.
         """
 
         climate_zone = self.get_climate_zone(county, PUMA)
-        # Create a new copy of the probability distribution TSV files, so we can
-        # make some changes to them.
+        # Create a new copy of the probability distribution TSV files, so we can change them without
+        # affecting the originals.
         with tempfile.TemporaryDirectory(prefix="sampling_", dir=self.buildstock_dir) as tmpdir:
             temp_housing_characteristics_dir = os.path.join(tmpdir, "housing_characteristics")
             shutil.copytree(self.housing_characteristics_dir, temp_housing_characteristics_dir)
@@ -128,8 +136,9 @@ class SampleOnly:
                     writer = csv.writer(new_f, delimiter="\t")
                     headers = next(reader)
                     writer.writerow(headers)
+
                     # First value in headers lists the climate zone dependency -
-                    # just keep the others, which list the County+PUMA options.
+                    # just use the others, which list the County+PUMA options.
                     assert headers[0] == "Dependency=ASHRAE IECC Climate Zone 2004"
                     headers = headers[1:]
                     for row in reader:
@@ -138,22 +147,24 @@ class SampleOnly:
                             continue
 
                         elif row[0] == climate_zone:
+                            # Replace probabilities with 1 for our selected location and 0s everywhere else.
                             county_header = f"Option={county}, {PUMA}"
                             writer.writerow(
                                 [row[0]] + ["1" if headers[i] == county_header else "0" for i, v in enumerate(row[1:])]
                             )
 
                         else:
+                            # Leave other climate zones unchanged - they won't be used anyway.
                             writer.writerow(row)
-                            # writer.writerow([row[0]] + (len(headers) - 1) * ["0"])
 
             self.cfg = {"project_directory": os.path.basename(tmpdir)}
             self.project_dir = tmpdir
-            # Must create sampler after all instances vars exist, because it makes a copy of this object.
+
+            # Note: Must create sampler after all instances vars exist, because it makes a copy of this object.
             sampler = residential_quota.ResidentialQuotaSampler(self, n_samples)
             sampler.run_sampling()
 
-            # Copy output to non-temp dir
+            # Copy results from temp dir to output dir
             shutil.copy(
                 os.path.join(temp_housing_characteristics_dir, "buildstock.csv"),
                 os.path.join(self.output_dir, f"buildstock_{county}_{PUMA}_{n_samples}.csv"),
@@ -162,10 +173,10 @@ class SampleOnly:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("county")
-    parser.add_argument("PUMA")
-    parser.add_argument("n_samples", help="comma-separated list of samples sizes to generate")
-    parser.add_argument("buildstock_dir", help="Path of the ResStock directory (expected to contain project_national)")
+    parser.add_argument("county", help="County GISJOIN ID - https://www.nhgis.org/geographic-crosswalks#geog-ids")
+    parser.add_argument("PUMA", help="PUMA GISJOIN ID")
+    parser.add_argument("n_samples", help="Comma-separated list of samples sizes to generate")
+    parser.add_argument("buildstock_dir", help="Path to the ResStock directory (expected to contain project_national)")
     parser.add_argument(
         "output_dir",
         default=".",
