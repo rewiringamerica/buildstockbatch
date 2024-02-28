@@ -1,4 +1,4 @@
-"""Create a sample of buildings (buildstock.csv) for a single county+PUMA.
+"""Runs the residental quota sampler for a single county+PUMA.
 
 Usage:
     python3 sample_one_county.py --help
