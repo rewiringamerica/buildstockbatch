@@ -11,7 +11,9 @@ Usage:
 
 Methodology:
     This modifies the conditional probability distributions from the standard ResStock national project
-    to filter the sample to a single county+PUMA.
+    to create a sample limited to a single county+PUMA. (For example, the selected location may normally
+    be used for 1% of buildings in a national sample, but we update it to get 100% of buildings while
+    every other location gets 0%.)
 
     To do this, we modify two files:
     - ASHRAE IECC Climate Zone 2004.tsv
@@ -19,7 +21,7 @@ Methodology:
     - County and PUMA.tsv
         - Make 100% of samples (within the chosen climate zone) fall into the selected county + PUMA
 
-    All other variables are downstream of these (or don't depend on them).
+    All other housing characteristics are downstream of these (or don't depend on them) and are unchanged.
 
 Assumptions:
     This logic is only guaranteed to work for the current ResStock national project. Other changes
@@ -62,7 +64,7 @@ class SampleOnly:
 
     @property
     def os_version(self):
-        return "3.6.1"
+        return "3.7.0"
 
     @property
     def project_filename(self):
@@ -70,7 +72,13 @@ class SampleOnly:
         return None
 
     def get_climate_zone(self, county, PUMA):
-        """Given a county and PUMA, find the climate zone that contains them."""
+        """Given a county and PUMA, find the climate zone that contains them.
+
+        :param county: GISJOIN ID of county (e.g. "G1900030")
+        :param PUMA: GISJOIN ID of PUMA (e.g. "G19001800")
+
+        :return: Climate zone string (e.g. "3A")
+        """
         with open(os.path.join(self.housing_characteristics_dir, "County and PUMA.tsv")) as f:
             reader = csv.reader(f, delimiter="\t")
             headers = next(reader)
@@ -98,10 +106,16 @@ class SampleOnly:
 
     def run_sampler(self, county, PUMA, n_samples):
         """
-        Args:
-            county: GISJOIN ID of county
-            PUMA: GISJOIN ID of PUMA
-            n_samples: Number of building samples to produce.
+        Create the requested number of buildings, all contained in the given county and PUMA.
+
+        This function:
+            - Updates the conditional probability distributions for climate zone and county + PUMA.
+            - Runs the ResidentialQuotaSampler.
+            - Renames and copies the resulting building.csv file into the output directory.
+
+        :param county: GISJOIN ID of county (e.g. "G1900030")
+        :param PUMA: GISJOIN ID of PUMA (e.g. "G19001800")
+        :param n_samples: Number of building samples to produce.
         """
 
         climate_zone = self.get_climate_zone(county, PUMA)
@@ -112,9 +126,9 @@ class SampleOnly:
             shutil.copytree(self.housing_characteristics_dir, temp_housing_characteristics_dir)
 
             # Update climate zone TSV
-            zone_filename = "ASHRAE IECC Climate Zone 2004.tsv"
-            zone_tsv = os.path.join(self.housing_characteristics_dir, zone_filename)
-            new_zone_tsv = os.path.join(temp_housing_characteristics_dir, zone_filename)
+            climate_zone_filename = "ASHRAE IECC Climate Zone 2004.tsv"
+            zone_tsv = os.path.join(self.housing_characteristics_dir, climate_zone_filename)
+            new_zone_tsv = os.path.join(temp_housing_characteristics_dir, climate_zone_filename)
             with open(zone_tsv) as old_f:
                 reader = csv.reader(old_f, delimiter="\t")
                 with open(new_zone_tsv, "w") as new_f:
