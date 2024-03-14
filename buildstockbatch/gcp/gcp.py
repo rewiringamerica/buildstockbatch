@@ -1186,12 +1186,13 @@ def main():
         GcpBatch.run_combine_results_on_cloud(gcs_bucket, gcs_prefix, results_dir, do_timeseries)
     else:
         parser = argparse.ArgumentParser()
-        parser.add_argument("project_filename")
+        parser.add_argument("project_filenames", help="Comma-separated list of project YAML files to run.")
         parser.add_argument(
-            "job_identifier",
+            "job_identifiers",
             nargs="?",
             default=None,
-            help="Optional override of gcp.job_identifier in your project file. Max 48 characters.",
+            help="Comma-separated list of job IDs to use."
+            "Optional override of gcp.job_identifier in your project file. Max 48 characters.",
         )
         group = parser.add_mutually_exclusive_group()
         group.add_argument(
@@ -1232,34 +1233,50 @@ def main():
         else:
             logger.setLevel(logging.INFO)
 
-        # validate the project, and if --validateonly flag is set, return True if validation passes
-        GcpBatch.validate_project(os.path.abspath(args.project_filename))
+        project_filenames = args.project_filenames.split(",")
+        n_projects = len(project_filenames)
+        job_IDs = len(project_filenames) * [None]
+        if args.job_identifiers:
+            job_IDs = args.job_identifiers.split(",")
+            if len(job_IDs) != n_projects:
+                raise ValidationError(
+                    f"job_identifiers contains {len(args.job_identifiers.split(','))} IDs, "
+                    f"but project_filenames contains {n_projects} files"
+                )
+
+        for project_filename, job_ID in zip(project_filenames, job_IDs):
+            logger.info(f"----------Validating {project_filename}{f' ({job_ID})' if job_ID else ''}----------")
+            # validate the project, and if --validateonly flag is set, return True if validation passes
+            GcpBatch.validate_project(os.path.abspath(project_filename))
+
         if args.validateonly:
-            return True
-
-        batch = GcpBatch(args.project_filename, args.job_identifier, missing_only=args.missingonly)
-        if args.clean:
-            batch.clean()
             return
-        if args.show_jobs:
-            batch.show_jobs()
-            return
-        elif args.postprocessonly:
-            if batch.check_for_existing_jobs(pp_only=True):
-                return
-            batch.build_image()
-            batch.push_image()
-            batch.process_results()
-        else:
-            if batch.check_for_existing_jobs():
-                return
-            if not args.missingonly:
-                batch.check_output_dir()
 
-            batch.build_image()
-            batch.push_image()
-            batch.run_batch()
-            batch.process_results()
+        for project_filename, job_ID in zip(project_filenames, job_IDs):
+            logger.info(f"----------Starting {project_filename}{f' ({job_ID})' if job_ID else ''}----------")
+            batch = GcpBatch(project_filename, job_ID, missing_only=args.missingonly)
+            if args.clean:
+                batch.clean()
+                continue
+            if args.show_jobs:
+                batch.show_jobs()
+                continue
+            elif args.postprocessonly:
+                if batch.check_for_existing_jobs(pp_only=True):
+                    continue
+                batch.build_image()
+                batch.push_image()
+                batch.process_results()
+            else:
+                if batch.check_for_existing_jobs():
+                    continue
+                if not args.missingonly:
+                    batch.check_output_dir()
+
+                batch.build_image()
+                batch.push_image()
+                batch.run_batch()
+                batch.process_results()
 
 
 if __name__ == "__main__":
