@@ -104,7 +104,6 @@ class DockerBatchBase(BuildStockBatchBase):
         job_count: int
 
     CONTAINER_RUNTIME = ContainerRuntime.DOCKER
-    MAX_JOB_COUNT = 10000
 
     def __init__(self, project_filename, missing_only=False):
         """
