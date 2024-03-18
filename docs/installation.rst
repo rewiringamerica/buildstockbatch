@@ -237,7 +237,6 @@ Amazon Web Services (Beta)
    The AWS version of buildstockbatch is in active development. Use at your own
    risk. It's provided as-is with no promise of support.
 
-=======
 Docker
 ......
 
