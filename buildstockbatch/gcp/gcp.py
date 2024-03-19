@@ -370,8 +370,7 @@ class GcpBatch(DockerBatchBase):
                 raise AttributeError(f"baseline:custom_gems = True, but did not find Gemfile at {local_gemfile_path}")
 
             # Copy the custom Gemfile into the buildstockbatch repo
-            bsb_root = os.path.join(os.path.abspath(__file__), os.pardir, os.pardir, os.pardir)
-            new_gemfile_path = os.path.join(bsb_root, "Gemfile")
+            new_gemfile_path = os.path.join(root_path, "Gemfile")
             shutil.copyfile(local_gemfile_path, new_gemfile_path)
             logger.info(f"Copying custom Gemfile from {local_gemfile_path}")
 
