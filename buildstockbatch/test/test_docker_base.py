@@ -63,15 +63,16 @@ def test_run_batch_prep(basic_residential_project_file, mocker):
         epws_to_copy, batch_info = dbb._run_batch_prep(tmppath)
         sampler_mock.run_sampling.assert_called_once()
 
-        # There are three weather files...
+        # There are three sets of weather files...
         #   * "G2500210.epw" is unique; check for it (gz'd) in tmppath
         #   * "G2601210.epw" and "G2601390.epw" are dupes. One should be in
         #     tmppath; one should be copied to the other according to ``epws_to_copy``
+        #   Same for the .ddy and .stat files.
         assert os.path.isfile(tmppath / "weather" / "G2500210.epw.gz")
         assert os.path.isfile(tmppath / "weather" / "G2601210.epw.gz") or os.path.isfile(
             tmppath / "weather" / "G2601390.epw.gz"
         )
-        src, dest = epws_to_copy[0]
+        src, dest = sorted(epws_to_copy)[1]
         assert src in ("G2601210.epw.gz", "G2601390.epw.gz")
         assert dest in ("G2601210.epw.gz", "G2601390.epw.gz")
         assert src != dest
@@ -124,7 +125,17 @@ def test_get_epws_to_download():
         }
 
         epws = docker_base.determine_epws_needed_for_job(sim_dir, jobs_d)
-        assert epws == {"weather/G2500210.epw", "weather/G2601390.epw"}
+        assert epws == {
+            "empty.epw",
+            "empty.stat",
+            "empty.ddy",
+            "weather/G2500210.epw",
+            "weather/G2601390.epw",
+            "weather/G2500210.ddy",
+            "weather/G2601390.ddy",
+            "weather/G2500210.stat",
+            "weather/G2601390.stat",
+        }
 
 
 def test_run_simulations(basic_residential_project_file):

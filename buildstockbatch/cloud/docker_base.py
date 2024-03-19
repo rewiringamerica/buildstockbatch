@@ -13,7 +13,6 @@ import csv
 from dataclasses import dataclass
 import docker
 from fsspec.implementations.local import LocalFileSystem
-import glob
 import gzip
 import itertools
 from joblib import Parallel, delayed
@@ -50,8 +49,10 @@ def determine_epws_needed_for_job(sim_dir, jobs_d):
     # Fetch the mapping for building to weather file from options_lookup.tsv
     epws_by_option, param_name = _epws_by_option(sim_dir / "lib" / "resources" / "options_lookup.tsv")
 
+    # ComStock requires these empty files to exist.
+    epws_to_download = set(["empty.epw", "empty.stat", "empty.ddy"])
+
     # Look through the buildstock.csv to find the appropriate location and epw
-    epws_to_download = set()
     building_ids = [x[0] for x in jobs_d["batch"]]
     with open(
         sim_dir / "lib" / "housing_characteristics" / "buildstock.csv",
@@ -61,7 +62,9 @@ def determine_epws_needed_for_job(sim_dir, jobs_d):
         csv_reader = csv.DictReader(f)
         for row in csv_reader:
             if int(row["Building"]) in building_ids:
-                epws_to_download.add(epws_by_option[row[param_name]])
+                epw_file = epws_by_option[row[param_name]]
+                root, _ = os.path.splitext(epw_file)
+                epws_to_download.update((f"{root}.epw", f"{root}.stat", f"{root}.ddy"))
 
     return epws_to_download
 
@@ -120,6 +123,10 @@ class DockerBatchBase(BuildStockBatchBase):
         except:  # noqa: E722 (allow bare except in this case because error can be a weird non-class Windows API error)
             logger.error("The docker server did not respond, make sure Docker Desktop is started then retry.")
             raise RuntimeError("The docker server did not respond, make sure Docker Desktop is started then retry.")
+
+        # Save reporting measure names, because (if we're running ComStock) we won't be able to look up the names
+        # when running individual tasks on the cloud.
+        self.cfg["reporting_measure_names"] = self.get_reporting_measures(self.cfg)
 
     def get_fs(self):
         return LocalFileSystem()
@@ -257,12 +264,13 @@ class DockerBatchBase(BuildStockBatchBase):
             # Downloads, if necessary, and extracts weather files to ``self._weather_dir``
             self._get_weather_files()
 
-            # Ensure all needed EPWs are present
+            # Ensure all needed weather files are present
             logger.info("Ensuring all needed weather files are present...")
-            epw_files = set(map(lambda x: x.split("/")[-1], glob.glob(f"{self.weather_dir}/*.epw")))
+            weather_files = os.listdir(self.weather_dir)
+
             missing_epws = set()
             for needed_epw in epws_needed_set:
-                if needed_epw not in epw_files:
+                if needed_epw not in weather_files:
                     missing_epws.add(needed_epw)
             if missing_epws:
                 raise ValidationError(
@@ -313,7 +321,7 @@ class DockerBatchBase(BuildStockBatchBase):
                     dupe_count += count - 1
                     dupe_bytes += bytes * (count - 1)
             logger.info(
-                f"Weather files: {len(epws_needed_set):,}/{len(epw_files):,} referenced; "
+                f"Weather files: {len(epws_needed_set):,}/{len(weather_files):,} referenced; "
                 f"{len(unique_epws):,} unique ({(upload_bytes / 1024 / 1024):,.1f} MiB to upload), "
                 f"{dupe_count:,} duplicates ({(dupe_bytes / 1024 / 1024):,.1f} MiB saved from uploading)"
             )
@@ -429,7 +437,7 @@ class DockerBatchBase(BuildStockBatchBase):
         )
 
         # Iterate over all values in the `param_name` column and collect the referenced EPWs
-        epws_needed = set()
+        epws_needed = set(["empty.epw", "empty.stat", "empty.ddy"])
         for lookup_value in buildstock_df[param_name]:
             if not lookup_value:
                 raise ValidationError(
@@ -441,7 +449,8 @@ class DockerBatchBase(BuildStockBatchBase):
                 raise ValidationError(f"Did not find an EPW for '{lookup_value}'")
 
             # Add just the filename (without relative path)
-            epws_needed.add(epw_path.split("/")[-1])
+            root, _ = os.path.splitext(os.path.basename(epw_path))
+            epws_needed.update((f"{root}.epw", f"{root}.stat", f"{root}.ddy"))
 
         logger.debug(f"Unique EPWs needed for this buildstock: {len(epws_needed):,}")
         return epws_needed
