@@ -165,7 +165,7 @@ def test_upload_files(mocker, basic_residential_project_file):
         if call_function == "resource":
             assert call[1][0] in ["s3"]  # call[1] is for the positional arguments
         if call_function == "Bucket":
-            assert call[1][0] == s3_bucket
+            assert call[1][0] == s3_bucket, call
         if call_function == "upload_file":
             source_file_path = call[1][0]
             destination_path = call[1][1]
