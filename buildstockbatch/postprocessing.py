@@ -634,6 +634,7 @@ def upload_results(aws_conf, output_dir, results_dir, buildstock_csv_filename):
     s3_prefix_output = s3_prefix + "/" + output_folder_name + "/"
 
     s3 = boto3.resource("s3")
+    print(f"In upload_results: {s3_bucket}")
     bucket = s3.Bucket(s3_bucket)
     n_existing_files = len(list(bucket.objects.filter(Prefix=s3_prefix_output)))
     if n_existing_files > 0:
@@ -643,6 +644,7 @@ def upload_results(aws_conf, output_dir, results_dir, buildstock_csv_filename):
     def upload_file(filepath, s3key=None):
         full_path = filepath if filepath.is_absolute() else parquet_dir.joinpath(filepath)
         s3 = boto3.resource("s3")
+        print(f"In upload_file: {s3_bucket}")
         bucket = s3.Bucket(s3_bucket)
         if s3key is None:
             s3key = Path(s3_prefix_output).joinpath(filepath).as_posix()
