@@ -167,6 +167,10 @@ You can optionally override the ``job_identifier`` from the command line
 (unless you delete a previous job with the ``--clean`` option), so this option makes it easier to
 quickly assign a new ID with each run without updating the config file.
 
+You can also run multiple projects in a row by specifying multiple project files (and optionally multiple IDs):
+``buildstock_gcp project_file1,yaml,project_file2.yaml job_id1,job_id2``.
+This will validate all the projects upfront, then run them sequentially.
+
 
 Retry failed tasks
 ..................
