@@ -64,7 +64,8 @@ For Windows, the process is similar.
 .. _set a Windows environment Variable: https://www.computerhope.com/issues/ch000549.htm
 .. _OpenStudio release: https://github.com/NREL/OpenStudio/releases
 
-.. _python:
+
+.. _bsb-python:
 
 BuildStockBatch Python Library
 ..............................
@@ -140,7 +141,7 @@ You can get a list of installed environments by looking in the envs directory
 
    ls /kfs2/shared-projects/buildstock/envs
 
-Developer Installaion
+Developer Installation
 ......................
 
 For those doing development work on buildstockbatch (not most users), a new
@@ -232,13 +233,49 @@ Amazon Web Services (Beta)
 
 .. warning::
 
-   The AWS version of buildstockbatch is currently broken. A remedy is in
-   progress. Thanks for your patience.
+   The AWS version of buildstockbatch is in active development. Use at your own
+   risk. It's provided as-is with no promise of support.
 
-The installation instructions are the same as the :ref:`local-install`
-installation. You will need to use an AWS account with appropriate permissions.
-The first time you run ``buildstock_aws`` it may take several minutes,
-especially over a slower internet connection as it is downloading and building a docker image.
+Docker
+......
+
+Install either `Docker Desktop <https://docs.docker.com/get-docker/>`_ of
+`Docker Engine <https://docs.docker.com/engine/install/>`_ for your platform.
+
+BuildStockBatch Python Library
+..............................
+
+Install the buildstockbatch python library as described in :ref:`bsb-python` for
+the local installation. You'll need to install with the ``aws`` extra as follows.
+
+For a standard installation
+
+::
+
+   cd /path/to/buildstockbatch
+   python -m pip install -e ".[aws]"
+
+For developer installation
+
+::
+
+   cd /path/to/buildstockbatch
+   python -m pip install -e ".[dev,aws]"
+   pre-commit install
+
+AWS User Configuration
+......................
+
+Follow the instructions for :ref:`aws-user-config-local` on the local install.
+Your AWS user account or role needs to have pretty expansive permissions to
+create IAM roles, VPCs, compute resources, etc.
+
+.. todo::
+
+   Define permission set needed.
+
+   For NREL users, the typical ``resbldg-user`` or ``developers`` role in the
+   nrel-aws-resbldg account is probably insufficient.
 
 
 Google Cloud Platform
@@ -265,7 +302,7 @@ One-time GCP setup that can be shared by multiple users.
       * Install `Terraform`_.
       * From the buildstockbatch/gcp/ directory, run the following with your chosen GCP project and region
         (e.g. "us-central1"). You can optionally specify the names of the storage bucket and
-        artifact registery repository. See `main.tf` for more details.
+        artifact registry repository. See `main.tf` for more details.
 
         ::
 
@@ -292,7 +329,7 @@ One-time setup that each user needs to do on the workstation from which they'll 
 manage BuildStockBatch runs.
 
 1. Install `Docker`_. This is needed by the script to manage Docker images (pull, push, etc).
-2. Get BuildStockBatch and set up a Python environment for it using the :ref:`python` instructions
+2. Get BuildStockBatch and set up a Python environment for it using the :ref:`bsb-python` instructions
    above. (i.e., create a Python virtual environment, activate the venv, and install buildstockbatch
    with the command below.)
 

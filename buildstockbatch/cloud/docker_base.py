@@ -13,7 +13,6 @@ import csv
 from dataclasses import dataclass
 import docker
 from fsspec.implementations.local import LocalFileSystem
-import glob
 import gzip
 import itertools
 from joblib import Parallel, delayed
@@ -33,25 +32,27 @@ import time
 
 from buildstockbatch import postprocessing
 from buildstockbatch.base import BuildStockBatchBase, ValidationError
-from buildstockbatch.utils import ContainerRuntime, calc_hash_for_file, compress_file, read_csv
+from buildstockbatch.utils import ContainerRuntime, calc_hash_for_file, compress_file, read_csv, get_bool_env_var
 
 logger = logging.getLogger(__name__)
 
 
-def determine_epws_needed_for_job(sim_dir, jobs_d):
+def determine_weather_files_needed_for_job(sim_dir, jobs_d):
     """
     Gets the list of filenames for the weather data required for a job of simulations.
 
     :param sim_dir: Path to the directory where job files are stored
     :param jobs_d: Contents of a single job JSON file; contains the list of buildings to simulate in this job.
 
-    :returns: Set of epw filenames needed for this job of simulations.
+    :returns: Set of weather filenames needed for this job of simulations.
     """
     # Fetch the mapping for building to weather file from options_lookup.tsv
     epws_by_option, param_name = _epws_by_option(sim_dir / "lib" / "resources" / "options_lookup.tsv")
 
+    # ComStock requires these empty files to exist.
+    files_to_download = set(["empty.epw", "empty.stat", "empty.ddy"])
+
     # Look through the buildstock.csv to find the appropriate location and epw
-    epws_to_download = set()
     building_ids = [x[0] for x in jobs_d["batch"]]
     with open(
         sim_dir / "lib" / "housing_characteristics" / "buildstock.csv",
@@ -61,9 +62,11 @@ def determine_epws_needed_for_job(sim_dir, jobs_d):
         csv_reader = csv.DictReader(f)
         for row in csv_reader:
             if int(row["Building"]) in building_ids:
-                epws_to_download.add(epws_by_option[row[param_name]])
+                epw_file = epws_by_option[row[param_name]]
+                root, _ = os.path.splitext(epw_file)
+                files_to_download.update((f"{root}.epw", f"{root}.stat", f"{root}.ddy"))
 
-    return epws_to_download
+    return files_to_download
 
 
 def _epws_by_option(options_lookup_path):
@@ -104,7 +107,6 @@ class DockerBatchBase(BuildStockBatchBase):
         job_count: int
 
     CONTAINER_RUNTIME = ContainerRuntime.DOCKER
-    MAX_JOB_COUNT = 10000
 
     def __init__(self, project_filename, missing_only=False):
         """
@@ -114,12 +116,19 @@ class DockerBatchBase(BuildStockBatchBase):
         super().__init__(project_filename)
         self.missing_only = missing_only
 
+        if get_bool_env_var("POSTPROCESSING_INSIDE_DOCKER_CONTAINER"):
+            return
+
         self.docker_client = docker.DockerClient.from_env()
         try:
             self.docker_client.ping()
         except:  # noqa: E722 (allow bare except in this case because error can be a weird non-class Windows API error)
             logger.error("The docker server did not respond, make sure Docker Desktop is started then retry.")
             raise RuntimeError("The docker server did not respond, make sure Docker Desktop is started then retry.")
+
+        # Save reporting measure names, because (if we're running ComStock) we won't be able to look up the names
+        # when running individual tasks on the cloud.
+        self.cfg["reporting_measure_names"] = self.get_reporting_measures(self.cfg)
 
     def get_fs(self):
         return LocalFileSystem()
@@ -153,6 +162,88 @@ class DockerBatchBase(BuildStockBatchBase):
         """
         raise NotImplementedError
 
+    def build_image(self, platform):
+        """
+        Build the docker image to use in the batch simulation
+
+        :param platform: String specifying the platform to build for. Must be "aws" or "gcp".
+        """
+        assert platform in ("aws", "gcp")
+        root_path = pathlib.Path(os.path.abspath(__file__)).parent.parent.parent
+        if not (root_path / "Dockerfile").exists():
+            raise RuntimeError(f"The needs to be run from the root of the repo, found {root_path}")
+
+        # Make the buildstock/resources/.build_docker_image dir to store logs
+        local_log_dir = pathlib.Path(self.buildstock_dir, "resources", ".cloud_docker_image")
+        if not os.path.exists(local_log_dir):
+            os.makedirs(local_log_dir)
+
+        # Determine whether or not to build the image with custom gems bundled in
+        if self.cfg.get("baseline", dict()).get("custom_gems", False):
+            # Ensure the custom Gemfile exists in the buildstock dir
+            local_gemfile_path = pathlib.Path(self.buildstock_dir, "resources", "Gemfile")
+            if not local_gemfile_path.exists():
+                raise AttributeError(f"baseline:custom_gems = True, but did not find Gemfile at {local_gemfile_path}")
+
+            # Copy the custom Gemfile into the buildstockbatch repo
+            new_gemfile_path = root_path / "Gemfile"
+            shutil.copyfile(local_gemfile_path, new_gemfile_path)
+            logger.info(f"Copying custom Gemfile from {local_gemfile_path}")
+
+            # Choose the custom-gems stage in the Dockerfile,
+            # which runs bundle install to build custom gems into the image
+            stage = "buildstockbatch-custom-gems"
+        else:
+            # Choose the base stage in the Dockerfile,
+            # which stops before bundling custom gems into the image
+            stage = "buildstockbatch"
+
+        logger.info(f"Building docker image stage: {stage} from OpenStudio {self.os_version}")
+        img, build_logs = self.docker_client.images.build(
+            path=str(root_path),
+            tag=self.docker_image,
+            rm=True,
+            target=stage,
+            platform="linux/amd64",
+            buildargs={"OS_VER": self.os_version, "CLOUD_PLATFORM": platform},
+        )
+        build_image_log = os.path.join(local_log_dir, "build_image.log")
+        with open(build_image_log, "w") as f_out:
+            f_out.write("Built image")
+            for line in build_logs:
+                for itm_type, item_msg in line.items():
+                    if itm_type in ["stream", "status"]:
+                        try:
+                            f_out.write(f"{item_msg}")
+                        except UnicodeEncodeError:
+                            pass
+        logger.debug(f"Review docker image build log: {build_image_log}")
+
+        # Report and confirm the openstudio version from the image
+        os_ver_cmd = "openstudio openstudio_version"
+        container_output = self.docker_client.containers.run(
+            self.docker_image, os_ver_cmd, remove=True, name="list_openstudio_version"
+        )
+        assert self.os_version in container_output.decode()
+
+        # Report gems included in the docker image.
+        # The OpenStudio Docker image installs the default gems
+        # to /var/oscli/gems, and the custom docker image
+        # overwrites these with the custom gems.
+        list_gems_cmd = (
+            "openstudio --bundle /var/oscli/Gemfile --bundle_path /var/oscli/gems "
+            "--bundle_without native_ext gem_list"
+        )
+        container_output = self.docker_client.containers.run(
+            self.docker_image, list_gems_cmd, remove=True, name="list_gems"
+        )
+        gem_list_log = os.path.join(local_log_dir, "openstudio_gem_list_output.log")
+        with open(gem_list_log, "wb") as f_out:
+            f_out.write(container_output)
+        for line in container_output.decode().split("\n"):
+            logger.debug(line)
+        logger.debug(f"Review custom gems list at: {gem_list_log}")
+
     def start_batch_job(self, batch_info):
         """Create and start the Batch job on the cloud.
 
@@ -173,7 +264,7 @@ class DockerBatchBase(BuildStockBatchBase):
         """
         with tempfile.TemporaryDirectory(prefix="bsb_") as tmpdir:
             tmppath = pathlib.Path(tmpdir)
-            epws_to_copy, batch_info = self._run_batch_prep(tmppath)
+            weather_files_to_copy, batch_info = self._run_batch_prep(tmppath)
 
             # If we're rerunning failed tasks from a previous job, DO NOT overwrite the job files.
             # That would assign a new random set of buildings to each task, making the rerun useless.
@@ -183,7 +274,7 @@ class DockerBatchBase(BuildStockBatchBase):
                 self.upload_batch_files_to_cloud(tmppath)
 
                 logger.info("Copying duplicate weather files...")
-                self.copy_files_at_cloud(epws_to_copy)
+                self.copy_files_at_cloud(weather_files_to_copy)
 
         self.start_batch_job(batch_info)
 
@@ -220,22 +311,22 @@ class DockerBatchBase(BuildStockBatchBase):
 
         # Collect simulations to queue (along with the EPWs those sims need)
         logger.info("Preparing simulation batch jobs...")
-        batch_info, epws_needed = self._prep_jobs_for_batch(tmppath)
+        batch_info, files_needed = self._prep_jobs_for_batch(tmppath)
 
         if self.missing_only:
             epws_to_copy = None
         else:
             # Weather files
             logger.info("Prepping weather files...")
-            epws_to_copy = self._prep_weather_files_for_batch(tmppath, epws_needed)
+            epws_to_copy = self._prep_weather_files_for_batch(tmppath, files_needed)
 
         return (epws_to_copy, batch_info)
 
-    def _prep_weather_files_for_batch(self, tmppath, epws_needed_set):
-        """Prepare the weather files (EPWs) needed by the batch.
+    def _prep_weather_files_for_batch(self, tmppath, weather_files_needed_set):
+        """Prepare the weather files needed by the batch.
 
         1. Downloads, if necessary, and extracts weather files to ``self._weather_dir``.
-        2. Ensures that all EPWs needed by the batch are present.
+        2. Ensures that all weather files needed by the batch are present.
         3. Identifies weather files thare are duplicates to avoid redundant compression work and
            bytes uploaded to the cloud.
             * Puts unique files in the ``tmppath`` (in the 'weather' subdir) which will get uploaded
@@ -245,7 +336,8 @@ class DockerBatchBase(BuildStockBatchBase):
 
         :param tmppath: Unique weather files (compressed) will be copied into a 'weather' subdir
             of this path.
-        :param epws_needed_set: A set of weather filenames needed by the batch.
+        :param weather_files_needed_set: A set of weather filenames needed by the batch.
+
         :returns: an array of tuples where the first value is the filename of a file that will be
             uploaded to cloud storage (because it's in the ``tmppath``), and the second value is the
             filename that the first should be copied to.
@@ -257,12 +349,12 @@ class DockerBatchBase(BuildStockBatchBase):
             # Downloads, if necessary, and extracts weather files to ``self._weather_dir``
             self._get_weather_files()
 
-            # Ensure all needed EPWs are present
+            # Ensure all needed weather files are present
             logger.info("Ensuring all needed weather files are present...")
-            epw_files = set(map(lambda x: x.split("/")[-1], glob.glob(f"{self.weather_dir}/*.epw")))
+            weather_files = os.listdir(self.weather_dir)
             missing_epws = set()
-            for needed_epw in epws_needed_set:
-                if needed_epw not in epw_files:
+            for needed_epw in weather_files_needed_set:
+                if needed_epw not in weather_files:
                     missing_epws.add(needed_epw)
             if missing_epws:
                 raise ValidationError(
@@ -273,7 +365,7 @@ class DockerBatchBase(BuildStockBatchBase):
 
             # Determine the unique weather files
             logger.info("Calculating hashes for weather files")
-            epw_filenames = list(epws_needed_set)
+            epw_filenames = list(weather_files_needed_set)
             epw_hashes = Parallel(n_jobs=-1, verbose=9)(
                 delayed(calc_hash_for_file)(pathlib.Path(self.weather_dir) / epw_filename)
                 for epw_filename in epw_filenames
@@ -313,7 +405,7 @@ class DockerBatchBase(BuildStockBatchBase):
                     dupe_count += count - 1
                     dupe_bytes += bytes * (count - 1)
             logger.info(
-                f"Weather files: {len(epws_needed_set):,}/{len(epw_files):,} referenced; "
+                f"Weather files: {len(weather_files_needed_set):,}/{len(weather_files):,} referenced; "
                 f"{len(unique_epws):,} unique ({(upload_bytes / 1024 / 1024):,.1f} MiB to upload), "
                 f"{dupe_count:,} duplicates ({(dupe_bytes / 1024 / 1024):,.1f} MiB saved from uploading)"
             )
@@ -336,12 +428,7 @@ class DockerBatchBase(BuildStockBatchBase):
             n_sims = n_datapoints * (len(self.cfg.get("upgrades", [])) + 1)
         logger.debug("Total number of simulations = {}".format(n_sims))
 
-        # This is the maximum number of jobs that can be in an array
-        if self.batch_array_size <= self.MAX_JOB_COUNT:
-            max_array_size = self.batch_array_size
-        else:
-            max_array_size = self.MAX_JOB_COUNT
-        n_sims_per_job = math.ceil(n_sims / max_array_size)
+        n_sims_per_job = math.ceil(n_sims / self.batch_array_size)
         n_sims_per_job = max(n_sims_per_job, 2)
         logger.debug("Number of simulations per array job = {}".format(n_sims_per_job))
 
@@ -359,7 +446,7 @@ class DockerBatchBase(BuildStockBatchBase):
 
         # Ensure all weather files are available
         logger.debug("Determining which weather files are needed...")
-        epws_needed = self._determine_epws_needed_for_batch(df)
+        files_needed = self._determine_weather_files_needed_for_batch(df)
 
         # Write each batch of simulations to a file.
         logger.info("Queueing jobs")
@@ -382,7 +469,7 @@ class DockerBatchBase(BuildStockBatchBase):
         logger.debug("Job count = {}".format(job_count))
         batch_info = DockerBatchBase.BatchInfo(n_sims=n_sims, n_sims_per_job=n_sims_per_job, job_count=job_count)
         if self.missing_only:
-            return batch_info, epws_needed
+            return batch_info, files_needed
 
         # Compress job jsons
         jobs_dir = tmppath / "jobs"
@@ -413,15 +500,15 @@ class DockerBatchBase(BuildStockBatchBase):
                 "lib/housing_characteristics",
             )
 
-        return batch_info, epws_needed
+        return batch_info, files_needed
 
-    def _determine_epws_needed_for_batch(self, buildstock_df):
+    def _determine_weather_files_needed_for_batch(self, buildstock_df):
         """
-        Gets the list of EPW filenames required for a batch of simulations.
+        Gets the list of weather filenames required for a batch of simulations.
 
         :param buildstock_df: DataFrame of the buildstock batch being simulated.
 
-        :returns: Set of EPW filenames needed for this batch of simulations.
+        :returns: Set of weather filenames needed for this batch of simulations.
         """
         # Fetch the mapping for building to weather file from options_lookup.tsv
         epws_by_option, param_name = _epws_by_option(
@@ -429,7 +516,7 @@ class DockerBatchBase(BuildStockBatchBase):
         )
 
         # Iterate over all values in the `param_name` column and collect the referenced EPWs
-        epws_needed = set()
+        files_needed = set(["empty.epw", "empty.stat", "empty.ddy"])
         for lookup_value in buildstock_df[param_name]:
             if not lookup_value:
                 raise ValidationError(
@@ -440,11 +527,12 @@ class DockerBatchBase(BuildStockBatchBase):
             if not epw_path:
                 raise ValidationError(f"Did not find an EPW for '{lookup_value}'")
 
-            # Add just the filename (without relative path)
-            epws_needed.add(epw_path.split("/")[-1])
+            # Add just the filenames (without relative path)
+            root, _ = os.path.splitext(os.path.basename(epw_path))
+            files_needed.update((f"{root}.epw", f"{root}.stat", f"{root}.ddy"))
 
-        logger.debug(f"Unique EPWs needed for this buildstock: {len(epws_needed):,}")
-        return epws_needed
+        logger.debug(f"Unique weather files needed for this buildstock: {len(files_needed):,}")
+        return files_needed
 
     @classmethod
     def run_simulations(cls, cfg, job_id, jobs_d, sim_dir, fs, output_path):
@@ -481,8 +569,23 @@ class DockerBatchBase(BuildStockBatchBase):
                 with open(sim_dir / "os_stdout.log", "w") as f_out:
                     try:
                         logger.debug("Running {}".format(sim_id))
+                        cli_cmd = ["openstudio", "run", "-w", "in.osw"]
+                        if cfg.get("baseline", dict()).get("custom_gems", False):
+                            cli_cmd = [
+                                "openstudio",
+                                "--bundle",
+                                "/var/oscli/Gemfile",
+                                "--bundle_path",
+                                "/var/oscli/gems",
+                                "--bundle_without",
+                                "native_ext",
+                                "run",
+                                "-w",
+                                "in.osw",
+                                "--debug",
+                            ]
                         subprocess.run(
-                            ["openstudio", "run", "-w", "in.osw"],
+                            cli_cmd,
                             check=True,
                             stdout=f_out,
                             stderr=subprocess.STDOUT,
@@ -553,6 +656,7 @@ class DockerBatchBase(BuildStockBatchBase):
         This only checks for results_job[ID].json.gz files in the results directory.
 
         :param expected: Number of result files expected.
+
         :returns: The number of files that were missing.
         """
         fs = self.get_fs()
@@ -579,26 +683,24 @@ class DockerBatchBase(BuildStockBatchBase):
     def log_summary(self):
         """
         Log a summary of how many simulations succeeded, failed, or ended with other statuses.
-
-        Uses the `completed_status` column of the files in results_csvs/results_*.csv.gz.
+        Uses the `completed_status` column of the files in results/parquet/.../results_up*.parquet.
         """
         fs = self.get_fs()
         # Summary of simulation statuses across all upgrades
         status_summary = {}
         total_counts = collections.defaultdict(int)
 
-        results_csv_dir = f"{self.results_dir}/results_csvs/"
+        results_glob = f"{self.results_dir}/parquet/**/results_up*.parquet"
         try:
-            results_files = fs.ls(results_csv_dir)
+            results_files = fs.glob(results_glob)
         except FileNotFoundError:
-            logger.info(f"No results CSV files found at {results_csv_dir}")
+            logger.info(f"No results parquet files found at {results_glob}")
             return
 
         for result in results_files:
             upgrade_id = result.split(".")[0][-2:]
             with fs.open(result) as f:
-                with gzip.open(f) as gf:
-                    df = pd.read_csv(gf, usecols=["completed_status"])
+                df = pd.read_parquet(f, columns=["completed_status"])
             # Dict mapping from status (e.g. "Success") to count
             statuses = df.groupby("completed_status").size().to_dict()
             status_summary[upgrade_id] = statuses
