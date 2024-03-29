@@ -1107,7 +1107,7 @@ def main():
             "job_identifiers",
             nargs="?",
             default=None,
-            help="Comma-separated list of job IDs to use."
+            help="Comma-separated list of job IDs to use. "
             "Optional override of gcp.job_identifier in your project file. Max 48 characters.",
         )
         group = parser.add_mutually_exclusive_group()
