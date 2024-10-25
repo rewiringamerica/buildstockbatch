@@ -201,18 +201,18 @@ class DockerBatchBase(BuildStockBatchBase):
         logger.info(f"Building docker image stage: {stage} from OpenStudio {self.os_version}")
         try:
             img, build_logs = self.docker_client.images.build(
-            path=str(root_path),
-            tag=self.docker_image,
-            rm=True,
-            target=stage,
-            platform="linux/amd64",
-            buildargs={"OS_VER": self.os_version, "CLOUD_PLATFORM": platform},
+                path=str(root_path),
+                tag=self.docker_image,
+                rm=True,
+                target=stage,
+                platform="linux/amd64",
+                buildargs={"OS_VER": self.os_version, "CLOUD_PLATFORM": platform},
             )
         except docker.errors.BuildError as e:
             for line in e.build_log:
-                if 'stream' in line:
-                    logger.error(line['stream'].strip())
-                elif 'errorDetail' in line:
+                if "stream" in line:
+                    logger.error(line["stream"].strip())
+                elif "errorDetail" in line:
                     logger.error(f"Error: {line['errorDetail']['message'].strip()}")
             raise
         build_image_log = os.path.join(local_log_dir, "build_image.log")
