@@ -4,24 +4,14 @@ ARG CLOUD_PLATFORM=aws
 ENV DEBIAN_FRONTEND=noninteractive
 COPY . /buildstock-batch/
 
-RUN apt update && apt install -y wget
-RUN mkdir -p ~/miniconda3
-RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda3/miniconda.sh
-RUN bash ~/miniconda3/miniconda.sh -b -u -p ~/miniconda3
-RUN . ~/miniconda3/bin/activate
-ENV PATH="/root/miniconda3/bin:$PATH"
-RUN echo "PATH=$PATH"
-RUN conda init --all
-RUN conda create -n bsb311 python=3.11
-RUN conda init bash
-RUN echo "conda activate bsb311" >> ~/.bashrc
-ENV PATH="/root/miniconda3/envs/bsb311/bin:$PATH"
-RUN echo "PATH=$PATH"
-
-RUN python -m pip install "/buildstock-batch[${CLOUD_PLATFORM}]"
+RUN echo "hello"
+RUN curl -k -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.cargo/bin:$PATH"
+RUN uv python install 3.11
+RUN uv venv --python 3.11 && uv pip install "/buildstock-batch[${CLOUD_PLATFORM}]"
 
 # Base plus custom gems
-FROM buildstockbatch as buildstockbatch-custom-gems
+FROM --platform=linux/amd64 buildstockbatch as buildstockbatch-custom-gems
 RUN sudo cp /buildstock-batch/Gemfile /var/oscli/
 # OpenStudio's docker image sets ENV BUNDLE_WITHOUT=native_ext
 # https://github.com/NREL/docker-openstudio/blob/3.2.1/Dockerfile#L12
