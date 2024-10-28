@@ -3,6 +3,8 @@ FROM --platform=linux/amd64 nrel/openstudio:$OS_VER as buildstockbatch
 ARG CLOUD_PLATFORM=aws
 ENV DEBIAN_FRONTEND=noninteractive
 COPY . /buildstock-batch/
+COPY nrel_root_ca.crt /usr/local/share/ca-certificates/
+RUN update-ca-certificates
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.cargo/bin:$PATH"
