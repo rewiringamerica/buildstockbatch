@@ -122,4 +122,4 @@ Development Changelog
         :tags: general
         :pullreq: 472
 
-        Remove support for Python 3.8, 3.9, and 3.10.
+        Remove support for Python 3.8, 3.9, and 3.10. Add support for Python 3.12.

@@ -4,7 +4,6 @@ ARG CLOUD_PLATFORM=aws
 ENV DEBIAN_FRONTEND=noninteractive
 COPY . /buildstock-batch/
 
-RUN echo "hello"
 RUN curl -k -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.cargo/bin:$PATH"
 RUN uv python install 3.11
