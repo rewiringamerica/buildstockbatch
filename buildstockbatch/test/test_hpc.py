@@ -9,7 +9,7 @@ import tarfile
 from unittest.mock import patch
 import gzip
 
-from buildstockbatch.hpc import eagle_cli, kestrel_cli, EagleBatch, KestrelBatch, SlurmBatch  # noqa: F401
+from buildstockbatch.hpc import kestrel_cli, KestrelBatch, SlurmBatch  # noqa: F401
 from buildstockbatch.base import BuildStockBatchBase
 from buildstockbatch.utils import get_project_configuration, read_csv
 
@@ -95,11 +95,8 @@ def test_hpc_run_building(mock_subprocess, monkeypatch, basic_residential_projec
 
 def _test_env_vars_passed(mock_subprocess, hpc_name):
     env_vars_to_check = ["PROJECTFILE", "MEASURESONLY", "SAMPLINGONLY"]
-    if hpc_name == "eagle":
-        env_vars_to_check.append("MY_CONDA_ENV")
-    else:
-        assert hpc_name == "kestrel"
-        env_vars_to_check.append("MY_PYTHON_ENV")
+    assert hpc_name == "kestrel"
+    env_vars_to_check.append("MY_PYTHON_ENV")
     export_found = False
     for arg in mock_subprocess.run.call_args[0][0]:
         if arg.startswith("--export"):
@@ -110,7 +107,7 @@ def _test_env_vars_passed(mock_subprocess, hpc_name):
     assert exported_env_vars.issuperset(env_vars_to_check)
 
 
-@pytest.mark.parametrize("hpc_name", ["eagle", "kestrel"])
+@pytest.mark.parametrize("hpc_name", ["kestrel"])
 def test_user_cli(basic_residential_project_file, monkeypatch, mocker, hpc_name):
     mock_subprocess = mocker.patch("buildstockbatch.hpc.subprocess")
     mock_validate_apptainer_image = mocker.patch("buildstockbatch.hpc.SlurmBatch.validate_apptainer_image_hpc")
@@ -125,13 +122,9 @@ def test_user_cli(basic_residential_project_file, monkeypatch, mocker, hpc_name)
 
     project_filename, results_dir = basic_residential_project_file(hpc_name=hpc_name)
     shutil.rmtree(results_dir)
-    if hpc_name == "eagle":
-        monkeypatch.setenv("CONDA_PREFIX", "something")
-        cli = eagle_cli
-    else:
-        assert hpc_name == "kestrel"
-        monkeypatch.setenv("VIRTUAL_ENV", "something")
-        cli = kestrel_cli
+    assert hpc_name == "kestrel"
+    monkeypatch.setenv("VIRTUAL_ENV", "something")
+    cli = kestrel_cli
     argv = [project_filename]
     cli(argv)
     mock_subprocess.run.assert_called_once()
@@ -188,7 +181,7 @@ def test_user_cli(basic_residential_project_file, monkeypatch, mocker, hpc_name)
     assert "0" == mock_subprocess.run.call_args[1]["env"]["MEASURESONLY"]
 
 
-@pytest.mark.parametrize("hpc_name", ["eagle", "kestrel"])
+@pytest.mark.parametrize("hpc_name", ["kestrel"])
 def test_qos_high_job_submit(basic_residential_project_file, monkeypatch, mocker, hpc_name):
     mock_subprocess = mocker.patch("buildstockbatch.hpc.subprocess")
     mock_subprocess.run.return_value.stdout = "Submitted batch job 1\n"
@@ -198,11 +191,8 @@ def test_qos_high_job_submit(basic_residential_project_file, monkeypatch, mocker
     mocker.patch.object(SlurmBatch, "weather_dir", None)
     project_filename, results_dir = basic_residential_project_file(hpc_name=hpc_name)
     shutil.rmtree(results_dir)
-    if hpc_name == "eagle":
-        monkeypatch.setenv("CONDA_PREFIX", "something")
-    else:
-        assert hpc_name == "kestrel"
-        monkeypatch.setenv("VIRTUAL_ENV", "something")
+    assert hpc_name == "kestrel"
+    monkeypatch.setenv("VIRTUAL_ENV", "something")
     monkeypatch.setenv("SLURM_JOB_QOS", "high")
 
     batch = Batch(project_filename)
@@ -224,7 +214,7 @@ def test_qos_high_job_submit(basic_residential_project_file, monkeypatch, mocker
     assert "--qos=high" in mock_subprocess.run.call_args[0][0]
 
 
-@pytest.mark.parametrize("hpc_name", ["eagle", "kestrel"])
+@pytest.mark.parametrize("hpc_name", ["kestrel"])
 def test_queue_jobs_minutes_per_sim(mocker, basic_residential_project_file, monkeypatch, hpc_name):
     mock_subprocess = mocker.patch("buildstockbatch.hpc.subprocess")
     Batch = eval(f"{hpc_name.capitalize()}Batch")
@@ -242,11 +232,9 @@ def test_queue_jobs_minutes_per_sim(mocker, basic_residential_project_file, monk
         }
     )
     shutil.rmtree(results_dir)
-    if hpc_name == "eagle":
-        monkeypatch.setenv("CONDA_PREFIX", "something")
-    else:
-        assert hpc_name == "kestrel"
-        monkeypatch.setenv("VIRTUAL_ENV", "something")
+
+    assert hpc_name == "kestrel"
+    monkeypatch.setenv("VIRTUAL_ENV", "something")
 
     batch = Batch(project_filename)
     for i in range(1, 11):
@@ -255,7 +243,7 @@ def test_queue_jobs_minutes_per_sim(mocker, basic_residential_project_file, monk
         json.dump({"batch": list(range(1000))}, f)
     batch.queue_jobs()
     mock_subprocess.run.assert_called_once()
-    n_minutes = 14 if hpc_name == "eagle" else 5
+    n_minutes = 5
     assert f"--time={n_minutes}" in mock_subprocess.run.call_args[0][0]
 
 

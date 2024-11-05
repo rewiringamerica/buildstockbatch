@@ -807,7 +807,7 @@ Results output browser (Cloud Console):
         Storage. The BSB implementation tries to write both indirectly (via
         `postprocessing.combine_results()`, using `get_fs()`), and directly (through
         `upload_results`). Which way the results end up on S3 depends on whether the script was run
-        via aws.py (indirect write), or locally or Eagle (direct upload).
+        via aws.py (indirect write), or locally or Kestrel (direct upload).
 
         Here, where writing to GCS is (currently) coupled to running on GCS, the writing
         to GCS will happen indirectly (via `postprocessing.combine_results()`), and we don't need to
