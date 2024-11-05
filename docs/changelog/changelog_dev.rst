@@ -123,3 +123,9 @@ Development Changelog
         :pullreq: 472
 
         Remove support for Python 3.8, 3.9, and 3.10. Add support for Python 3.12.
+
+    .. change::
+        :tags: general
+        :pullreq: 472
+
+        Remove eagle related code and references since eagle is retired.

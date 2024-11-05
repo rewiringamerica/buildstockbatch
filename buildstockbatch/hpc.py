@@ -888,10 +888,12 @@ def main():
 
     # only direct script argument is the project .yml file
     parser = argparse.ArgumentParser()
+    parser.add_argument("hpc_name", choices=["kestrel"])
     parser.add_argument("project_filename")
     args = parser.parse_args()
 
     # initialize the KestrelBatch object
+    assert args.hpc_name == "kestrel"
     batch = KestrelBatch(args.project_filename)
     # other arguments/cues about which part of the process we are in are
     # encoded in slurm job environment variables
