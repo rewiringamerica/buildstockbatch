@@ -495,6 +495,7 @@ def test_dask_config():
         with pytest.raises(ValidationError, match=r"needs to be a multiple of 1024"):
             AwsBatch.validate_dask_settings(test3_filename)
 
+
 def test_validate_kestrel_output_directory():
     minimal_yml = pathlib.Path(example_yml_dir, "minimal-schema.yml")
     with pytest.raises(ValidationError, match=r"must be in /scratch or /projects"):
