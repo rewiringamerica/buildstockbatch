@@ -102,3 +102,24 @@ Development Changelog
         exposes optional ``include_annual_bills`` (defaults to true) and
         ``include_monthly_bills`` (defaults to false) arguments for reporting annual
         and monthly utility bill outputs, respectively.
+
+    .. change::
+        :tags: general, bugfix
+        :pullreq: 464
+
+        Stop creating dask _metadata files for the timeseries parquet files since it crashes the
+        postprocessing.
+
+    .. change::
+        :tags: bugfix, hpc
+        :pullreq: 467
+
+        Updates the bind mount for apptainer to include the whole resources
+        directory instead of just the hpxml-measures directory. Makes it work
+        with newer versions of ResStock.
+
+    .. change::
+        :tags: general
+        :pullreq: 472
+
+        Remove support for Python 3.8, 3.9, and 3.10. Add support for Python 3.12.
