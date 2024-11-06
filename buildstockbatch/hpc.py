@@ -3,7 +3,7 @@
 """
 buildstockbatch.hpc
 ~~~~~~~~~~~~~~~
-This class contains the object & methods that allow for usage of the library with Eagle and Kestrel
+This class contains the object & methods that allow for usage of the library with Kestrel
 
 :author: Noel Merket
 :copyright: (c) 2018 by The Alliance for Sustainable Energy
@@ -732,38 +732,6 @@ class SlurmBatch(BuildStockBatchBase):
         self.queue_post_processing(job_ids, hipri=hipri)
 
 
-class EagleBatch(SlurmBatch):
-    DEFAULT_SYS_IMAGE_DIR = "/shared-projects/buildstock/singularity_images"
-    HPC_NAME = "eagle"
-    CORES_PER_NODE = 36
-    MIN_SIMS_PER_JOB = 36 * 2
-    DEFAULT_POSTPROCESSING_NODE_MEMORY_MB = 85248
-    DEFAULT_NODE_MEMORY_MB = 85248  # standard node on Eagle
-    DEFAULT_POSTPROCESSING_N_PROCS = 18
-    DEFAULT_POSTPROCESSING_N_WORKERS = 2
-
-    @classmethod
-    def validate_output_directory_eagle(cls, project_file):
-        cfg = get_project_configuration(project_file)
-        output_dir = path_rel_to_file(project_file, cfg["output_directory"])
-        if not re.match(r"/(lustre/eaglefs/)?(scratch|projects)", output_dir):
-            raise ValidationError(
-                f"`output_directory` must be in /scratch or /projects," f" `output_directory` = {output_dir}"
-            )
-
-    @classmethod
-    def validate_project(cls, project_file):
-        super(cls, cls).validate_project(project_file)
-        cls.validate_output_directory_eagle(project_file)
-        logger.info("Eagle Validation Successful")
-        return True
-
-    @staticmethod
-    def _queue_jobs_env_vars() -> dict:
-        env = {"MY_CONDA_ENV": os.environ["CONDA_PREFIX"]}
-        return env
-
-
 class KestrelBatch(SlurmBatch):
     DEFAULT_SYS_IMAGE_DIR = "/kfs2/shared-projects/buildstock/apptainer_images"
     HPC_NAME = "kestrel"
@@ -824,17 +792,13 @@ logging_config = {
 }
 
 
-def eagle_cli(argv=sys.argv[1:]):
-    user_cli(EagleBatch, argv)
-
-
 def kestrel_cli(argv=sys.argv[1:]):
     user_cli(KestrelBatch, argv)
 
 
 def user_cli(Batch: SlurmBatch, argv: list):
     """
-    This is the user entry point for running buildstockbatch on Eagle/Kestrel
+    This is the user entry point for running buildstockbatch on Kestrel
     """
     # set up logging, currently based on within-this-file hard-coded config
     logging.config.dictConfig(logging_config)
@@ -916,7 +880,7 @@ def main():
     - upload results to Athena (job_array_number == 0 and POSTPROCESS and UPLOADONLY)
 
     The context for the work is deinfed by the project_filename (project .yml file),
-    which is used to initialize an EagleBatch object.
+    which is used to initialize an KestrelBatch object.
     """
 
     # set up logging, currently based on within-this-file hard-coded config
@@ -924,16 +888,13 @@ def main():
 
     # only direct script argument is the project .yml file
     parser = argparse.ArgumentParser()
-    parser.add_argument("hpc_name", choices=["eagle", "kestrel"])
+    parser.add_argument("hpc_name", choices=["kestrel"])
     parser.add_argument("project_filename")
     args = parser.parse_args()
 
-    # initialize the EagleBatch/KestrelBatch object
-    if args.hpc_name == "eagle":
-        batch = EagleBatch(args.project_filename)
-    else:
-        assert args.hpc_name == "kestrel"
-        batch = KestrelBatch(args.project_filename)
+    # initialize the KestrelBatch object
+    assert args.hpc_name == "kestrel"
+    batch = KestrelBatch(args.project_filename)
     # other arguments/cues about which part of the process we are in are
     # encoded in slurm job environment variables
     job_array_number = int(os.environ.get("SLURM_ARRAY_TASK_ID", 0))
@@ -966,9 +927,7 @@ def main():
 
 if __name__ == "__main__":
     bsb_cli = os.environ.get("BUILDSTOCKBATCH_CLI")
-    if bsb_cli == "eagle":
-        eagle_cli()
-    elif bsb_cli == "kestrel":
+    if bsb_cli == "kestrel":
         kestrel_cli()
     else:
         main()

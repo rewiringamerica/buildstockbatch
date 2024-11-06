@@ -20,13 +20,10 @@ Running a project file is straightforward. Call the ``buildstock_local`` command
     Running the simulation with ``--postprocessonly`` when there is already postprocessed results from previous run will
     overwrite those results.
 
-NREL HPC (Eagle or Kestrel)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-After you have :ref:`activated the appropriate conda environment on Eagle <eagle_install>`,
-you can submit a project file to be simulated by passing it to the ``buildstock_eagle`` command.
-
-.. command-output:: buildstock_eagle --help
-   :ellipsis: 0,8
+NREL HPC (Kestrel)
+~~~~~~~~~~~~~~~~~~~
+After you have :ref:`activated the appropriate conda environment on Kestrel <kestrel_install>`,
+you can submit a project file to be simulated by passing it to the ``buildstock_kestrel`` command.
 
 .. command-output:: buildstock_kestrel --help
    :ellipsis: 0, 8
@@ -40,19 +37,19 @@ you can submit a project file to be simulated by passing it to the ``buildstock_
 Project configuration
 .....................
 
-To run a project on Kestrel or Eagle, you will need to make a few changes to
+To run a project on Kestrel, you will need to make a few changes to
 your :doc:`project_defn`. First, the ``output_directory`` should be in
 ``/scratch/your_username/some_directory`` or in ``/projects`` somewhere.
 Building stock simulations generate a lot of output quickly and the ``/scratch``
 or ``/projects`` filesystem are equipped to handle that kind of I/O throughput
 where your ``/home`` directory is not.
 
-Next, you will need to add a :ref:`kestrel-config` or :ref:`eagle-config` top level key to the
+Next, you will need to add a :ref:`kestrel-config` top level key to the
 project file, which will look something like this:
 
 .. code-block:: yaml
 
-    kestrel:  # or eagle
+    kestrel:
       account: your_hpc_allocation
       n_jobs: 100  # the number of concurrent nodes to use
       minutes_per_sim: 2
