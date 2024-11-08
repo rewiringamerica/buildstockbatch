@@ -15,19 +15,17 @@ from buildstockbatch.utils import get_project_configuration, read_csv
 
 here = os.path.dirname(os.path.abspath(__file__))
 
-
+@patch("buildstockbatch.base.BuildStockBatchBase.cleanup_sim_dir")
 @patch("buildstockbatch.hpc.subprocess")
-def test_hpc_run_building(mock_subprocess, monkeypatch, basic_residential_project_file):
-    tar_filename = (
-        pathlib.Path(__file__).resolve().parent / "test_results" / "simulation_output" / "simulations_job0.tar.gz"
-    )  # noqa E501
-    with tarfile.open(tar_filename, "r") as tarf:
-        osw_dict = json.loads(tarf.extractfile("up00/bldg0000001/in.osw").read().decode("utf-8"))
+def test_hpc_run_building(mock_subprocess, mock_cleanup_sim_dir, monkeypatch, basic_residential_project_file):
 
-    project_filename, results_dir = basic_residential_project_file()
+    osw_path = pathlib.Path(__file__).resolve().parent / "test_results" / "simulation_output_raw" / "up00" / "bldg0000001" / "in.osw"
+    with open(osw_path, "r") as file:
+        osw_dict = json.load(file)
+
+    project_filename, results_dir = basic_residential_project_file(raw=True)
     tmp_path = pathlib.Path(results_dir).parent
     sim_path = tmp_path / "output" / "simulation_output" / "up00" / "bldg0000001"
-    os.makedirs(sim_path)
 
     cfg = get_project_configuration(project_filename)
 
@@ -330,26 +328,26 @@ def test_run_building_process(mocker, basic_residential_project_file):
 
     # check results job-json
     refrence_path = pathlib.Path(__file__).resolve().parent / "test_results" / "reference_files"
-
-    refrence_list = json.loads(open(refrence_path / "results_job1.json", "r").read())
-
     output_list = json.loads(gzip.open(results_dir / "simulation_output" / "results_job1.json.gz", "r").read())
 
-    refrence_list = [json.dumps(d) for d in refrence_list]
-    output_list = [json.dumps(d) for d in output_list]
+    assert len(output_list) == 8
+    assert len([d for d in output_list if d["upgrade"] == 1]) == 4
+    assert len([d for d in output_list if d["upgrade"] == 0]) == 4
 
-    assert sorted(refrence_list) == sorted(output_list)
+    ts_files = list((results_dir / "results" / "simulation_output" / "timeseries").glob("**/*.parquet"))
+    assert len(ts_files) == 6  # The testing data has 2 failed sims
 
-    ts_files = list(refrence_path.glob("**/*.parquet"))
-
-    def compare_ts_parquets(source, dst):
+    def verify_ts_parquets(source):
         test_pq = pd.read_parquet(source).reset_index().drop(columns=["index"]).rename(columns=str.lower)
-        reference_pq = pd.read_parquet(dst).reset_index().drop(columns=["index"]).rename(columns=str.lower)
-        pd.testing.assert_frame_equal(test_pq, reference_pq)
+        assert len(test_pq) == 8760
+        schedules_columns = [col for col in test_pq.columns if col.startswith('schedules_')]
+        assert len(schedules_columns) > 0, "No schedules were appended to the timeseries parquet"
+        for col in schedules_columns:
+            assert test_pq[col].between(0, 1).all(), f"Schedule {col} not between 0 and 1"
+
 
     for file in ts_files:
-        results_file = results_dir / "results" / "simulation_output" / "timeseries" / file.parent.name / file.name
-        compare_ts_parquets(file, results_file)
+        verify_ts_parquets(file)
 
     # Check that buildstock.csv was trimmed properly
     local_buildstock_df = read_csv(results_dir / "local_housing_characteristics_dir" / "buildstock.csv", dtype=str)

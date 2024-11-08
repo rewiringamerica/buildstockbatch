@@ -12,7 +12,7 @@ def basic_residential_project_file():
     with tempfile.TemporaryDirectory() as test_directory:
 
         def _basic_residential_project_file(update_args={}, raw=False, hpc_name="eagle"):
-            output_dir = "simulations_job0" if raw else "simulation_output"
+            output_dir = "simulation_output_raw" if raw else "simulation_output"
             buildstock_directory = os.path.join(test_directory, "openstudio_buildstock")
             shutil.copytree(
                 os.path.join(
