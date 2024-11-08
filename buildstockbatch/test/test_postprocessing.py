@@ -19,7 +19,9 @@ postprocessing.performance_report = MagicMock()
 
 def test_report_additional_results_csv_columns(basic_residential_project_file):
     reporting_measures = ["ReportingMeasure1", "ReportingMeasure2"]
-    project_filename, results_dir = basic_residential_project_file(raw=True, update_args={"reporting_measures": reporting_measures})
+    project_filename, results_dir = basic_residential_project_file(
+        raw=True, update_args={"reporting_measures": reporting_measures}
+    )
 
     fs = LocalFileSystem()
 
@@ -53,8 +55,8 @@ def test_report_additional_results_csv_columns(basic_residential_project_file):
 
     for upgrade_id in (0, 1):
         df = read_csv(str(results_dir / "results_csvs" / f"results_up{upgrade_id:02d}.csv.gz"))
-        assert 'Measure Failed' in df[df['building_id']==3]['step_failures'].iloc[0]
-        df = df[df['building_id'] != 3]
+        assert "Measure Failed" in df[df["building_id"] == 3]["step_failures"].iloc[0]
+        df = df[df["building_id"] != 3]
         assert (df["reporting_measure1.column_1"] == 1).all()
         assert (df["reporting_measure1.column_2"] == 2).all()
         assert (df["reporting_measure2.column_3"] == 3).all()

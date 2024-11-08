@@ -15,11 +15,19 @@ from buildstockbatch.utils import get_project_configuration, read_csv
 
 here = os.path.dirname(os.path.abspath(__file__))
 
+
 @patch("buildstockbatch.base.BuildStockBatchBase.cleanup_sim_dir")
 @patch("buildstockbatch.hpc.subprocess")
 def test_hpc_run_building(mock_subprocess, mock_cleanup_sim_dir, monkeypatch, basic_residential_project_file):
 
-    osw_path = pathlib.Path(__file__).resolve().parent / "test_results" / "simulation_output_raw" / "up00" / "bldg0000001" / "in.osw"
+    osw_path = (
+        pathlib.Path(__file__).resolve().parent
+        / "test_results"
+        / "simulation_output_raw"
+        / "up00"
+        / "bldg0000001"
+        / "in.osw"
+    )
     with open(osw_path, "r") as file:
         osw_dict = json.load(file)
 
@@ -328,11 +336,10 @@ def test_run_building_process(mocker, basic_residential_project_file):
     def verify_ts_parquets(source):
         test_pq = pd.read_parquet(source).reset_index().drop(columns=["index"]).rename(columns=str.lower)
         assert len(test_pq) == 8760
-        schedules_columns = [col for col in test_pq.columns if col.startswith('schedules_')]
+        schedules_columns = [col for col in test_pq.columns if col.startswith("schedules_")]
         assert len(schedules_columns) > 0, "No schedules were appended to the timeseries parquet"
         for col in schedules_columns:
             assert test_pq[col].between(0, 1).all(), f"Schedule {col} not between 0 and 1"
-
 
     for file in ts_files:
         verify_ts_parquets(file)
