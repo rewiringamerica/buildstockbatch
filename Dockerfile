@@ -7,7 +7,7 @@ COPY nrel_root_ca.crt /usr/local/share/ca-certificates/
 RUN update-ca-certificates
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:$PATH"
+ENV PATH="/root/.local/bin:/root/.cargo/bin:$PATH"
 RUN uv python install 3.11
 RUN uv venv --python 3.11 && uv pip install "/buildstock-batch[${CLOUD_PLATFORM}]"
 
