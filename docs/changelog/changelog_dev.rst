@@ -129,3 +129,9 @@ Development Changelog
         :pullreq: 472
 
         Remove eagle related code and references since eagle is retired.
+
+    .. change::
+        :tags: general
+        :pullreq: 465
+
+        Append schedules to the timeseries files.
