@@ -20,6 +20,8 @@ Running a project file is straightforward. Call the ``buildstock_local`` command
     Running the simulation with ``--postprocessonly`` when there is already postprocessed results from previous run will
     overwrite those results.
 
+.. _kestrel-run:
+
 NREL HPC (Kestrel)
 ~~~~~~~~~~~~~~~~~~~
 After you have :ref:`activated the appropriate conda environment on Kestrel <kestrel_install>`,
