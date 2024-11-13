@@ -111,6 +111,10 @@ Development Changelog
         postprocessing.
 
     .. change::
+        :tags: general, bugfix
+        :pullreq: 466
+
+        Add a flag to allow only uploading the missing files to s3.
         :tags: bugfix, hpc
         :pullreq: 467
 
