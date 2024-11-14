@@ -22,8 +22,8 @@ Running a project file is straightforward. Call the ``buildstock_local`` command
 
 .. _kestrel-run:
 
-NREL HPC (Kestrel)
-~~~~~~~~~~~~~~~~~~~
+Running on NREL HPC (Kestrel)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 After you have :ref:`activated the appropriate conda environment on Kestrel <kestrel_install>`,
 you can submit a project file to be simulated by passing it to the ``buildstock_kestrel`` command.
 
@@ -74,8 +74,10 @@ fail. If most of the jobs succeeded, rather than rerun everything you can
 resubmit just the jobs that failed with the ``--rerun_failed`` command line
 argument. This will also clear out and rerun the postprocessing.
 
-Amazon Web Services
-~~~~~~~~~~~~~~~~~~~
+.. _aws-run:
+
+Running on Amazon Web Services
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Running a batch on AWS is done by calling the ``buildstock_aws`` command line
 tool.
@@ -126,8 +128,10 @@ This will clean up all the AWS resources that were created on your behalf to run
 the simulations. Your results will still be on S3 and queryable in Athena.
 
 
-Google Cloud Platform
-~~~~~~~~~~~~~~~~~~~~~
+.. _gcp-run:
+
+Running on Google Cloud Platform
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Run a project on GCP by calling the ``buildstock_gcp`` command line tool.
 
