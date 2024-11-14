@@ -131,7 +131,7 @@ the simulations. Your results will still be on S3 and queryable in Athena.
 .. _gcp-run:
 
 Running on Google Cloud Platform
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Run a project on GCP by calling the ``buildstock_gcp`` command line tool.
 
