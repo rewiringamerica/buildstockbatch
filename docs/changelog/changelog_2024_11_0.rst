@@ -111,6 +111,12 @@ v2024.11.0 Changelog
         with newer versions of ResStock.
 
     .. change::
+        :tags: general, bugfix
+        :pullreq: 466
+
+        Add ``--continue_upload`` flag to allow only uploading the missing files to s3.
+
+    .. change::
         :tags: general
         :pullreq: 472
 
