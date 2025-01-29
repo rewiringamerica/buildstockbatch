@@ -57,11 +57,7 @@ def test_resstock_local_batch(project_filename):
     assert (simout_path / "results_job0.json.gz").exists()
     assert (simout_path / "simulations_job0.tar.gz").exists()
 
-    upgrade2expected_buildings = {
-        0: [1, 2],
-        1: [2],
-        2: [2]
-    }
+    upgrade2expected_buildings = {0: [1, 2], 1: [2], 2: [2]}
     for upgrade_id in range(0, n_upgrades + 1):
         for bldg_id in upgrade2expected_buildings[upgrade_id]:
             assert (simout_path / "timeseries" / f"up{upgrade_id:02d}" / f"bldg{bldg_id:07d}.parquet").exists()
