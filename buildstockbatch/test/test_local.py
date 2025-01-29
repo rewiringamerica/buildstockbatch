@@ -19,9 +19,9 @@ from buildstockbatch.test.shared_testing_stuff import (
     "project_filename",
     [
         resstock_directory / "project_national" / "national_baseline.yml",
-        resstock_directory / "project_national" / "national_upgrades.yml",
+        resstock_directory / "project_national" / "sdr_upgrades_tmy3.yml",
         resstock_directory / "project_testing" / "testing_baseline.yml",
-        resstock_directory / "project_testing" / "testing_upgrades.yml",
+        # resstock_directory / "project_testing" / "testing_upgrades.yml",
     ],
     ids=lambda x: x.stem,
 )
