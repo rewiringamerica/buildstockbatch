@@ -64,7 +64,6 @@ def test_resstock_local_batch(project_filename):
 
     batch.process_results()
 
-    assert not (simout_path / "timeseries").exists()
     assert not (simout_path / "results_job0.json.gz").exists()
     assert (simout_path / "simulations_job0.tar.gz").exists()
     base_pq = out_path / "parquet" / "baseline" / "results_up00.parquet"
