@@ -4,7 +4,9 @@ from .commercial.latest.commercial import CommercialDefaultWorkflowGenerator as 
 from .residential.latest.residential_hpxml import ResidentialHpxmlWorkflowGenerator as latestResGenerator  # noqa F041
 from .residential import latest as residential_latest  # noqa F401
 from .commercial import latest as commercial_latest  # noqa F401
-from .commercial.v2024_07_18.commercial import CommercialDefaultWorkflowGenerator as v2024_07_18_CommercialDefaultWorkflowGenerator  # noqa F401
+from .commercial.v2024_07_18.commercial import (
+    CommercialDefaultWorkflowGenerator as v2024_07_18_CommercialDefaultWorkflowGenerator,
+)  # noqa F401
 from .residential.v2024_07_18.residential_hpxml import (
     ResidentialHpxmlWorkflowGenerator as v2024_07_18_ResidentialHpxmlWorkflowGenerator,
 )  # noqa F401
