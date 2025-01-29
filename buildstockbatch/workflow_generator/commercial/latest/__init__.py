@@ -1,7 +1,8 @@
-__version__ = "2024.07.18"
+__version__ = "2025.01.29"
 version_info = {
     "version": __version__,
     "version_description": """
-Initial version of the commercial workflow generator after refactor"
+In this version, the BuildExistingModel and ApplyUpgrade measures are passed project_name argument.
+In previous versions, we were copying housing_characteristics and measures into lib folder.
 """,
 }
