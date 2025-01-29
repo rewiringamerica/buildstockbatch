@@ -14,6 +14,7 @@ resstock_directory = pathlib.Path(__file__).parent / "testing_resstock_data"
 
 test_cfg = {
     "buildstock_directory": resstock_directory,
+    "project_directory": "project_testing",
     "baseline": {"n_buildings_represented": 100},
     "workflow_generator": {
         "type": "residential_hpxml",
@@ -340,6 +341,7 @@ def test_missing_arg_warning():
     """
     cfg = {
         "buildstock_directory": resstock_directory,
+        "project_directory": "project_testing",
         "baseline": {"n_buildings_represented": 100},
         "workflow_generator": {
             "type": "residential_hpxml",

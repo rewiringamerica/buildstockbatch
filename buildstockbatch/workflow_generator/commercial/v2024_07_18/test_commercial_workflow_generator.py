@@ -1,4 +1,4 @@
-from buildstockbatch.workflow_generator.commercial.latest.commercial import (
+from buildstockbatch.workflow_generator.commercial.v2024_07_18.commercial import (
     CommercialDefaultWorkflowGenerator,
 )
 
