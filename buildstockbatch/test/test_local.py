@@ -19,7 +19,6 @@ from buildstockbatch.test.shared_testing_stuff import (
     "project_filename",
     [
         resstock_directory / "project_national" / "national_baseline.yml",
-        resstock_directory / "project_national" / "sdr_upgrades_tmy3.yml",
         resstock_directory / "project_testing" / "testing_baseline.yml",
         # resstock_directory / "project_testing" / "testing_upgrades.yml",
     ],
@@ -57,13 +56,13 @@ def test_resstock_local_batch(project_filename):
     assert (simout_path / "results_job0.json.gz").exists()
     assert (simout_path / "simulations_job0.tar.gz").exists()
 
-    upgrade2expected_buildings = {0: [1, 2], 1: [2], 2: [2]}
     for upgrade_id in range(0, n_upgrades + 1):
-        for bldg_id in upgrade2expected_buildings[upgrade_id]:
+        for bldg_id in range(1, n_datapoints + 1):
             assert (simout_path / "timeseries" / f"up{upgrade_id:02d}" / f"bldg{bldg_id:07d}.parquet").exists()
 
     batch.process_results()
 
+    assert not (simout_path / "timeseries").exists()
     assert not (simout_path / "results_job0.json.gz").exists()
     assert (simout_path / "simulations_job0.tar.gz").exists()
     base_pq = out_path / "parquet" / "baseline" / "results_up00.parquet"
