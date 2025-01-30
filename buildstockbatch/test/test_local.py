@@ -20,7 +20,7 @@ from buildstockbatch.test.shared_testing_stuff import (
     [
         resstock_directory / "project_national" / "national_baseline.yml",
         resstock_directory / "project_testing" / "testing_baseline.yml",
-        # resstock_directory / "project_testing" / "testing_upgrades.yml",
+        resstock_directory / "project_national" / "sdr_upgrades_tmy3.yml",
     ],
     ids=lambda x: x.stem,
 )
@@ -55,15 +55,22 @@ def test_resstock_local_batch(project_filename):
     simout_path = out_path / "simulation_output"
     assert (simout_path / "results_job0.json.gz").exists()
     assert (simout_path / "simulations_job0.tar.gz").exists()
-
+    upgrades2expected_bldgs = {
+        0: [1, 2],
+        1: [2],
+        2: [2],
+    }
     for upgrade_id in range(0, n_upgrades + 1):
-        for bldg_id in range(1, n_datapoints + 1):
+        for bldg_id in upgrades2expected_bldgs[upgrade_id]:
             assert (simout_path / "timeseries" / f"up{upgrade_id:02d}" / f"bldg{bldg_id:07d}.parquet").exists()
 
     batch.process_results()
 
-    assert not (simout_path / "timeseries").exists()
-    assert not (simout_path / "results_job0.json.gz").exists()
+    if batch.cfg.get("postprocessing", {}).get("keep_individual_timeseries", False):
+        assert (simout_path / "timeseries").exists()
+    else:
+        assert not (simout_path / "timeseries").exists()
+
     assert (simout_path / "simulations_job0.tar.gz").exists()
     base_pq = out_path / "parquet" / "baseline" / "results_up00.parquet"
     assert base_pq.exists()
@@ -75,7 +82,13 @@ def test_resstock_local_batch(project_filename):
     ts_pq_path = out_path / "parquet" / "timeseries"
     ts_time_cols = ["time", "timeutc", "timedst"]
     for upgrade_id in range(0, n_upgrades + 1):
-        ts_pq_filename = ts_pq_path / f"upgrade={upgrade_id}" / "group0.parquet"
+        partition_path = ts_pq_path / f"upgrade={upgrade_id}"
+        for partition_col in batch.cfg.get("postprocessing", {}).get("partition_columns", []):
+            partition_dirs = list(partition_path.glob(f"{partition_col.lower()}=*"))
+            assert len(partition_dirs) > 0, f"No directories found for partition column: {partition_col}"
+            partition_path = partition_dirs[0]
+
+        ts_pq_filename = next(partition_path.glob("group*.parquet"))
         assert ts_pq_filename.exists()
         tsdf = pd.read_parquet(ts_pq_filename, columns=ts_time_cols)
         for col in tsdf.columns:
@@ -84,11 +97,15 @@ def test_resstock_local_batch(project_filename):
         if upgrade_id >= 1:
             upg_pq = out_path / "parquet" / "upgrades" / f"upgrade={upgrade_id}" / f"results_up{upgrade_id:02d}.parquet"
             assert upg_pq.exists()
-            upg = pd.read_parquet(upg_pq, columns=["completed_status"])
-            assert (upg["completed_status"] == "Success").all()
+            upg = pd.read_parquet(upg_pq, columns=["completed_status", "building_id"])
+            expected_bldgs = upgrades2expected_bldgs[upgrade_id]
+            for _, row in upg.iterrows():
+                if row["building_id"] in expected_bldgs:
+                    assert row["completed_status"] == "Success"
+                else:
+                    assert row["completed_status"] == "Invalid"
             assert upg.shape[0] == n_datapoints
     assert (ts_pq_path / "_common_metadata").exists()
-
     shutil.rmtree(out_path)
 
 
