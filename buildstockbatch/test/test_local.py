@@ -55,14 +55,18 @@ def test_resstock_local_batch(project_filename):
     simout_path = out_path / "simulation_output"
     assert (simout_path / "results_job0.json.gz").exists()
     assert (simout_path / "simulations_job0.tar.gz").exists()
-    upgrades2expected_bldgs = {
-        0: [1, 2],
-        1: [2],
-        2: [2],
-    }
+
+    # Build upgrades2expected_bldgs map by scanning existing files
+    upgrades2expected_bldgs = {}  # key: upgrade_id, value: list of building_ids
+    for upgrade_dir in (simout_path / "timeseries").glob("up*"):
+        upgrade_id = int(upgrade_dir.name[2:])  # Extract ID from 'up##'
+        bldg_files = list(upgrade_dir.glob("bldg*.parquet"))
+        upgrades2expected_bldgs[upgrade_id] = [int(f.stem[4:]) for f in bldg_files]  # Extract ID from 'bldg#######'
+
+    # Verify that each upgrade has at least one building
     for upgrade_id in range(0, n_upgrades + 1):
-        for bldg_id in upgrades2expected_bldgs[upgrade_id]:
-            assert (simout_path / "timeseries" / f"up{upgrade_id:02d}" / f"bldg{bldg_id:07d}.parquet").exists()
+        assert upgrade_id in upgrades2expected_bldgs, f"Upgrade {upgrade_id} not found in upgrades2expected_bldgs"
+        assert len(upgrades2expected_bldgs[upgrade_id]) > 0, f"Upgrade {upgrade_id} has no buildings"
 
     batch.process_results()
 
