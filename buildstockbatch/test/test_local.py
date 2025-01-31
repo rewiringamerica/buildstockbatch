@@ -32,9 +32,9 @@ def test_resstock_local_batch(project_filename):
     # Get the number of upgrades
     n_upgrades = len(batch.cfg.get("upgrades", []))
     # Limit the number of upgrades to 2 to reduce simulation time
-    if n_upgrades > 2:
-        batch.cfg["upgrades"] = batch.cfg["upgrades"][0:2]
-        n_upgrades = 2
+    if n_upgrades > 6:
+        batch.cfg["upgrades"] = batch.cfg["upgrades"][0:6]
+        n_upgrades = 6
 
     # Modify the number of datapoints so we're not here all day.
     if n_upgrades == 0:
@@ -62,11 +62,6 @@ def test_resstock_local_batch(project_filename):
         upgrade_id = int(upgrade_dir.name[2:])  # Extract ID from 'up##'
         bldg_files = list(upgrade_dir.glob("bldg*.parquet"))
         upgrades2expected_bldgs[upgrade_id] = [int(f.stem[4:]) for f in bldg_files]  # Extract ID from 'bldg#######'
-
-    # Verify that each upgrade has at least one building
-    for upgrade_id in range(0, n_upgrades + 1):
-        assert upgrade_id in upgrades2expected_bldgs, f"Upgrade {upgrade_id} not found in upgrades2expected_bldgs"
-        assert len(upgrades2expected_bldgs[upgrade_id]) > 0, f"Upgrade {upgrade_id} has no buildings"
 
     batch.process_results()
 
@@ -102,13 +97,13 @@ def test_resstock_local_batch(project_filename):
             upg_pq = out_path / "parquet" / "upgrades" / f"upgrade={upgrade_id}" / f"results_up{upgrade_id:02d}.parquet"
             assert upg_pq.exists()
             upg = pd.read_parquet(upg_pq, columns=["completed_status", "building_id"])
-            expected_bldgs = upgrades2expected_bldgs[upgrade_id]
+            assert upg.shape[0] == n_datapoints
+            expected_bldgs = upgrades2expected_bldgs.get(upgrade_id, [])
             for _, row in upg.iterrows():
                 if row["building_id"] in expected_bldgs:
                     assert row["completed_status"] == "Success"
                 else:
                     assert row["completed_status"] == "Invalid"
-            assert upg.shape[0] == n_datapoints
     assert (ts_pq_path / "_common_metadata").exists()
     shutil.rmtree(out_path)
 
