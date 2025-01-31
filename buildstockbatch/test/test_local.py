@@ -88,7 +88,7 @@ def test_resstock_local_batch(project_filename):
                 print(f"No directories found for partition column: {partition_col} for upgrade {upgrade_id}")
                 continue
             partition_path = partition_dirs[0]
-        if expected_bldgs:=upgrades2expected_bldgs.get(upgrade_id, []):
+        if expected_bldgs := upgrades2expected_bldgs.get(upgrade_id, []):
             ts_pq_filename = next(partition_path.glob("group*.parquet"))
             assert ts_pq_filename.exists()
             tsdf = pd.read_parquet(ts_pq_filename, columns=ts_time_cols)
