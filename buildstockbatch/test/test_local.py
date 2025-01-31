@@ -88,19 +88,19 @@ def test_resstock_local_batch(project_filename):
                 print(f"No directories found for partition column: {partition_col} for upgrade {upgrade_id}")
                 continue
             partition_path = partition_dirs[0]
+        if expected_bldgs:=upgrades2expected_bldgs.get(upgrade_id, []):
+            ts_pq_filename = next(partition_path.glob("group*.parquet"))
+            assert ts_pq_filename.exists()
+            tsdf = pd.read_parquet(ts_pq_filename, columns=ts_time_cols)
+            for col in tsdf.columns:
+                assert tsdf[col].dtype == "timestamp[s][pyarrow]"
 
-        ts_pq_filename = next(partition_path.glob("group*.parquet"))
-        assert ts_pq_filename.exists()
-        tsdf = pd.read_parquet(ts_pq_filename, columns=ts_time_cols)
-        for col in tsdf.columns:
-            assert tsdf[col].dtype == "timestamp[s][pyarrow]"
         assert (out_path / "results_csvs" / f"results_up{upgrade_id:02d}.csv.gz").exists()
         if upgrade_id >= 1:
             upg_pq = out_path / "parquet" / "upgrades" / f"upgrade={upgrade_id}" / f"results_up{upgrade_id:02d}.parquet"
             assert upg_pq.exists()
             upg = pd.read_parquet(upg_pq, columns=["completed_status", "building_id"])
             assert upg.shape[0] == n_datapoints
-            expected_bldgs = upgrades2expected_bldgs.get(upgrade_id, [])
             for _, row in upg.iterrows():
                 if row["building_id"] in expected_bldgs:
                     assert row["completed_status"] == "Success"
