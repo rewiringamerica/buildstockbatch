@@ -155,7 +155,6 @@ class ResidentialHpxmlWorkflowGenerator(WorkflowGeneratorBase):
         measure_args["BuildExistingModel"].update(
             {
                 "building_id": building_id,
-                "project_directory": self.cfg["project_directory"],
                 "sample_weight": self.cfg["baseline"]["n_buildings_represented"] / self.n_datapoints,
             }
         )
@@ -187,7 +186,7 @@ class ResidentialHpxmlWorkflowGenerator(WorkflowGeneratorBase):
         measure_d = self.cfg["upgrades"][upgrade_idx]
         apply_upgrade_measure = {
             "measure_dir_name": "ApplyUpgrade",
-            "arguments": {"run_measure": 1, "project_directory": self.cfg["project_directory"]},
+            "arguments": {"run_measure": 1},
         }
         if "upgrade_name" in measure_d:
             apply_upgrade_measure["arguments"]["upgrade_name"] = measure_d["upgrade_name"]

@@ -1,6 +1,8 @@
-from buildstockbatch.workflow_generator.residential.latest.residential_hpxml import ResidentialHpxmlWorkflowGenerator
-from buildstockbatch.workflow_generator.residential.latest.residential_hpxml_defaults import DEFAULT_MEASURE_ARGS
-from buildstockbatch.workflow_generator.residential.latest.residential_hpxml_arg_mapping import ARG_MAP
+from buildstockbatch.workflow_generator.residential.v2024_07_20.residential_hpxml import (
+    ResidentialHpxmlWorkflowGenerator,
+)
+from buildstockbatch.workflow_generator.residential.v2024_07_20.residential_hpxml_defaults import DEFAULT_MEASURE_ARGS
+from buildstockbatch.workflow_generator.residential.v2024_07_20.residential_hpxml_arg_mapping import ARG_MAP
 from testfixtures import LogCapture
 import os
 import yamale
@@ -14,7 +16,6 @@ resstock_directory = pathlib.Path(__file__).parent / "testing_resstock_data"
 
 test_cfg = {
     "buildstock_directory": resstock_directory,
-    "project_directory": "project_testing",
     "baseline": {"n_buildings_represented": 100},
     "workflow_generator": {
         "type": "residential_hpxml",
@@ -341,7 +342,6 @@ def test_missing_arg_warning():
     """
     cfg = {
         "buildstock_directory": resstock_directory,
-        "project_directory": "project_testing",
         "baseline": {"n_buildings_represented": 100},
         "workflow_generator": {
             "type": "residential_hpxml",
