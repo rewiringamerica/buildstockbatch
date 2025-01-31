@@ -31,7 +31,7 @@ def test_resstock_local_batch(project_filename):
 
     # Get the number of upgrades
     n_upgrades = len(batch.cfg.get("upgrades", []))
-    # Limit the number of upgrades to 2 to reduce simulation time
+    # Limit the number of upgrades to 6 to reduce simulation time
     if n_upgrades > 6:
         batch.cfg["upgrades"] = batch.cfg["upgrades"][0:6]
         n_upgrades = 6
